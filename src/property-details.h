@@ -39,6 +39,7 @@ template<class> class TypeImpl;
 struct ZoneTypeConfig;
 typedef TypeImpl<ZoneTypeConfig> Type;
 class TypeInfo;
+class LChunkLoaderBase;
 
 // Type of properties.
 // Order of properties is significant.
@@ -294,7 +295,13 @@ class PropertyDetails BASE_EMBEDDED {
     value_ = AttributesField::update(value, attributes);
   }
 
+  void set_field_index(int field_index) {
+    value_ = FieldIndexField::update(value_, field_index);
+  }
+
   uint32_t value_;
+
+  friend class LChunkLoaderBase;
 };
 
 

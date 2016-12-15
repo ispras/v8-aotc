@@ -32,8 +32,14 @@ void List<T, P>::AddAll(const List<T, P>& other, P alloc) {
 
 template<typename T, class P>
 void List<T, P>::AddAll(const Vector<T>& other, P alloc) {
+  AddAll(Vector<const T>(other.start(), other.length()), alloc);
+}
+
+
+template<typename T, class P>
+void List<T, P>::AddAll(const Vector<const T>& other, P alloc) {
   int result_length = length_ + other.length();
-  if (capacity_ < result_length) Resize(result_length, alloc);
+  if (capacity_ < result_length) GrowBy(result_length - capacity_, alloc);
   if (base::is_fundamental<T>()) {
     memcpy(data_ + length_, other.start(), sizeof(*data_) * other.length());
   } else {
@@ -54,13 +60,10 @@ void List<T, P>::ResizeAdd(const T& element, P alloc) {
 template<typename T, class P>
 void List<T, P>::ResizeAddInternal(const T& element, P alloc) {
   DCHECK(length_ >= capacity_);
-  // Grow the list capacity by 100%, but make sure to let it grow
-  // even when the capacity is zero (possible initial case).
-  int new_capacity = 1 + 2 * capacity_;
   // Since the element reference could be an element of the list, copy
   // it out of the old backing storage before resizing.
   T temp = element;
-  Resize(new_capacity, alloc);
+  GrowBy(1, alloc);
   data_[length_++] = temp;
 }
 
@@ -73,6 +76,13 @@ void List<T, P>::Resize(int new_capacity, P alloc) {
   List<T, P>::DeleteData(data_);
   data_ = new_data;
   capacity_ = new_capacity;
+}
+
+
+template<typename T, class P>
+void List<T, P>::GrowBy(int amount, P alloc) {
+  int new_capacity = Max(1 + 2 * capacity_, capacity_ + amount);
+  Resize(new_capacity, alloc);
 }
 
 

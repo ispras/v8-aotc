@@ -420,6 +420,7 @@ void Deoptimizer::DeoptimizeMarkedCodeForContext(Context* context) {
     SharedFunctionInfo* shared =
         SharedFunctionInfo::cast(deopt_data->SharedFunctionInfo());
     shared->EvictFromOptimizedCodeMap(codes[i], "deoptimized code");
+    shared->DiscardSavedOptimizedCode("deoptimized code");
 
     // Do platform-specific patching to force any activations to lazy deopt.
     if (!codes[i]->is_turbofanned() || FLAG_turbo_deoptimization) {

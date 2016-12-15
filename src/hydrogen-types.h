@@ -16,6 +16,8 @@ namespace internal {
 // Forward declarations.
 template <typename T> class Handle;
 class Object;
+class LChunkSaverBase;
+class LChunkLoaderBase;
 
 #define HTYPE_LIST(V)                                 \
   V(Any, 0x0)              /* 0000 0000 0000 0000 */  \
@@ -81,6 +83,9 @@ class HType FINAL {
   explicit HType(Kind kind) : kind_(kind) { }
 
   int16_t kind_;
+
+  friend class LChunkSaverBase;
+  friend class LChunkLoaderBase;
 };
 
 

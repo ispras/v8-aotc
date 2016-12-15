@@ -1595,6 +1595,11 @@ HValue* CodeStubGraphBuilder<FastNewClosureStub>::BuildCodeStub() {
     BuildInstallCode(js_function, shared_info);
   }
 
+  // Register closure in Isolate.
+  Add<HPushArguments>(js_function);
+  Add<HCallRuntime>(isolate()->factory()->empty_string(),
+      Runtime::FunctionForId(Runtime::kAddJSFunctionForStartPosition), 1);
+
   return js_function;
 }
 

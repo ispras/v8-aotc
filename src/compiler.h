@@ -15,6 +15,8 @@ namespace internal {
 
 class AstValueFactory;
 class HydrogenCodeStub;
+class CodeBlockDatabase;
+class LChunk;
 
 // ParseRestriction is used to restrict the set of valid statements in a
 // unit of compilation.  Restriction violations cause a syntax error.
@@ -89,6 +91,7 @@ class CompilationInfo {
   };
 
   CompilationInfo(Handle<JSFunction> closure, Zone* zone);
+  CompilationInfo(Handle<SharedFunctionInfo> shared_info, Zone* zone);
   CompilationInfo(Isolate* isolate, Zone* zone);
   virtual ~CompilationInfo();
 
@@ -106,6 +109,7 @@ class CompilationInfo {
   FunctionLiteral* function() const { return function_; }
   Scope* scope() const { return scope_; }
   Scope* script_scope() const { return script_scope_; }
+  LChunk* chunk() const { return chunk_; }
   Handle<Code> code() const { return code_; }
   Handle<JSFunction> closure() const { return closure_; }
   Handle<SharedFunctionInfo> shared_info() const { return shared_info_; }
@@ -230,6 +234,10 @@ class CompilationInfo {
     DCHECK(function_ == NULL);
     function_ = literal;
   }
+  void SetSharedFunctionInfo(Handle<SharedFunctionInfo> shared_info) {
+    DCHECK(shared_info_.is_null());
+    shared_info_ = shared_info;
+  }
   void PrepareForCompilation(Scope* scope);
   void SetScriptScope(Scope* script_scope) {
     DCHECK(script_scope_ == NULL);
@@ -238,6 +246,7 @@ class CompilationInfo {
   Handle<TypeFeedbackVector> feedback_vector() const {
     return feedback_vector_;
   }
+  void SetChunk(LChunk* chunk) { chunk_ = chunk; }
   void SetCode(Handle<Code> code) { code_ = code; }
   void SetExtension(v8::Extension* extension) {
     DCHECK(!is_lazy());
@@ -394,8 +403,6 @@ class CompilationInfo {
  protected:
   CompilationInfo(Handle<Script> script,
                   Zone* zone);
-  CompilationInfo(Handle<SharedFunctionInfo> shared_info,
-                  Zone* zone);
   CompilationInfo(HydrogenCodeStub* stub,
                   Isolate* isolate,
                   Zone* zone);
@@ -445,6 +452,8 @@ class CompilationInfo {
   Scope* script_scope_;
   // For compiled stubs, the stub object
   HydrogenCodeStub* code_stub_;
+  // Lithium IR.
+  LChunk* chunk_;
   // The compiled code.
   Handle<Code> code_;
 
@@ -571,10 +580,10 @@ class CompilationHandleScope BASE_EMBEDDED {
 
 class HGraph;
 class HOptimizedGraphBuilder;
-class LChunk;
+class LSavedChunk;
 
-// A helper class that calls the three compilation phases in
-// Crankshaft and keeps track of its state.  The three phases
+// A helper class that calls the three compilation and two AOTC phases
+// in Crankshaft and keeps track of its state.  The three phases
 // CreateGraph, OptimizeGraph and GenerateAndInstallCode can either
 // fail, bail-out to the full code generator or succeed.  Apart from
 // their return value, the status of the phase last run can be checked
@@ -585,7 +594,7 @@ class OptimizedCompileJob: public ZoneObject {
       : info_(info),
         graph_builder_(NULL),
         graph_(NULL),
-        chunk_(NULL),
+        chunk_(info->chunk()),
         last_status_(FAILED),
         awaiting_install_(false) { }
 
@@ -595,6 +604,8 @@ class OptimizedCompileJob: public ZoneObject {
 
   MUST_USE_RESULT Status CreateGraph();
   MUST_USE_RESULT Status OptimizeGraph();
+  MUST_USE_RESULT Status SaveChunk(LSavedChunk*);
+  MUST_USE_RESULT Status LoadChunk(const LSavedChunk*);
   MUST_USE_RESULT Status GenerateCode();
 
   Status last_status() const { return last_status_; }
@@ -726,6 +737,18 @@ class Compiler : public AllStatic {
 
   static bool DebuggerWantsEagerCompilation(
       CompilationInfo* info, bool allow_lazy_without_ctx = false);
+
+  static void InitializeCodeBlockDatabase();
+  static bool DiscardCodeFromCodeBlockDatabase(int start_position);
+  static void FinalizeCodeBlockDatabase();
+
+ private:
+  static bool SaveOptimizedCode(CompilationInfo* info);
+  static bool LoadOptimizedCode(CompilationInfo* info);
+  static bool GetOptimizedCodeNow(CompilationInfo* info);
+  static bool MakeOptimizedCode(CompilationInfo* info);
+
+  static SmartPointer<CodeBlockDatabase> code_block_database;
 };
 
 

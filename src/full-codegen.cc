@@ -1648,8 +1648,8 @@ void FullCodeGenerator::VisitNativeFunctionLiteral(
   Handle<Code> construct_stub = Handle<Code>(fun->shared()->construct_stub());
   Handle<SharedFunctionInfo> shared =
       isolate()->factory()->NewSharedFunctionInfo(
-          name, literals, FunctionKind::kNormalFunction, code,
-          Handle<ScopeInfo>(fun->shared()->scope_info()),
+          name, literals, 0, FunctionKind::kNormalFunction,
+          code, Handle<ScopeInfo>(fun->shared()->scope_info()),
           Handle<TypeFeedbackVector>(fun->shared()->feedback_vector()));
   shared->set_construct_stub(*construct_stub);
 

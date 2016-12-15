@@ -30,7 +30,8 @@ RUNTIME_FUNCTION(Runtime_CompileLazy) {
 #endif
 
   // Compile the target function.
-  DCHECK(function->shared()->allows_lazy_compilation());
+  DCHECK(function->shared()->allows_lazy_compilation() ||
+         function->shared()->has_saved_optimized_code());
 
   Handle<Code> code;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, code,
@@ -160,6 +161,7 @@ RUNTIME_FUNCTION(Runtime_NotifyDeoptimized) {
       // doesn't get used for new closures.
       function->shared()->EvictFromOptimizedCodeMap(*optimized_code,
                                                     "notify deoptimized");
+      function->shared()->DiscardSavedOptimizedCode("notify deoptimized");
     }
   } else {
     // TODO(titzer): we should probably do DeoptimizeCodeList(code)

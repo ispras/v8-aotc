@@ -38,6 +38,7 @@
 #endif
 
 #include "src/d8.h"
+#include "src/serialize.h"
 
 #include "include/libplatform/libplatform.h"
 #ifndef V8_SHARED
@@ -47,6 +48,8 @@
 #include "src/base/platform/platform.h"
 #include "src/base/sys-info.h"
 #include "src/basic-block-profiler.h"
+#include "src/code-block-database.h"
+#include "src/compiler.h"
 #include "src/d8-debug.h"
 #include "src/debug.h"
 #include "src/natives.h"
@@ -1462,6 +1465,53 @@ bool Shell::SetOptions(int argc, char* argv[]) {
 }
 
 
+void Shell::RegisterShellExternalFunctions(Isolate* isolate) {
+  i::Isolate* i = reinterpret_cast<i::Isolate*>(isolate);
+  i::ExternalReferenceTable* reftable
+    = i::ExternalReferenceTable::instance(i);
+
+  reftable->Add(FUNCTION_ADDR(Print), "Shell::Print", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(Write), "Shell::Write", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(Read), "Shell::Read", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(ReadBuffer), "Shell::ReadBuffer", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(ReadLine), "Shell::ReadLine", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(Load), "Shell::Load", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(Quit), "Shell::Quit", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(Version), "Shell::Version", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(PerformanceNow), "Shell::PerformanceNow",
+                i::SPECIAL);
+
+  // Realm object.
+  reftable->Add(FUNCTION_ADDR(RealmCurrent), "Shell::RealmCurrent",
+                i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmOwner), "Shell::RealmOwner", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmGlobal), "Shell::RealmGlobal", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmCreate), "Shell::RealmCreate", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmDispose), "Shell::RealmDispose",
+                i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmSwitch), "Shell::RealmSwitch", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmEval), "Shell::RealmEval", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmSharedGet), "Shell::RealmSharedGet",
+                i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RealmSharedSet), "Shell::RealmSharedSet",
+                i::SPECIAL);
+
+  // OS object.
+  reftable->Add(FUNCTION_ADDR(System), "Shell::System", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(ChangeDirectory), "Shell::ChangeDirectory",
+                i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(SetEnvironment), "Shell::SetEnvironment",
+                i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(UnsetEnvironment), "Shell::UnsetEnvironment",
+                i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(SetUMask), "Shell::SetUMask", i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(MakeDirectory), "Shell::MakeDirectory",
+                i::SPECIAL);
+  reftable->Add(FUNCTION_ADDR(RemoveDirectory), "Shell::RemoveDirectory",
+                i::SPECIAL);
+}
+
+
 int Shell::RunMain(Isolate* isolate, int argc, char* argv[]) {
 #ifndef V8_SHARED
   for (int i = 1; i < options.num_isolates; ++i) {
@@ -1482,6 +1532,7 @@ int Shell::RunMain(Isolate* isolate, int argc, char* argv[]) {
       }
 #endif  // !V8_SHARED
     }
+    RegisterShellExternalFunctions(isolate);
     {
       Context::Scope cscope(context);
       PerIsolateData::RealmScope realm_scope(PerIsolateData::Get(isolate));
@@ -1709,6 +1760,14 @@ int Shell::Main(int argc, char* argv[]) {
     }
 #endif
 
+    if (i::FLAG_save_code || i::FLAG_load_code) {
+      if (i::FLAG_save_code && i::FLAG_load_code) {
+        printf("You can't set both --save-code and --load-code.\n");
+        return 1;
+      }
+      i::Compiler::InitializeCodeBlockDatabase();
+    }
+
     if (options.stress_opt || options.stress_deopt) {
       Testing::SetStressRunType(options.stress_opt
                                 ? Testing::kStressTypeOpt
@@ -1733,6 +1792,10 @@ int Shell::Main(int argc, char* argv[]) {
 #endif
     } else {
       result = RunMain(isolate, argc, argv);
+    }
+
+    if (i::FLAG_save_code) {
+      i::Compiler::FinalizeCodeBlockDatabase();
     }
 
     // Run interactive shell if explicitly requested or if no script has been

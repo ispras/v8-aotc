@@ -5355,6 +5355,14 @@ int Map::SearchTransition(PropertyType type, Name* name,
 }
 
 
+int Map::SearchTransitionForTarget(Handle<Map> target) {
+  if (HasTransitionArray()) {
+    return transitions()->SearchTarget(target);
+  }
+  return TransitionArray::kNotFound;
+}
+
+
 FixedArray* Map::GetPrototypeTransitions() {
   if (!HasTransitionArray()) return GetHeap()->empty_fixed_array();
   if (!transitions()->HasPrototypeTransitions()) {
@@ -5588,6 +5596,9 @@ ACCESSORS(SharedFunctionInfo, optimized_code_map, Object,
 ACCESSORS(SharedFunctionInfo, construct_stub, Code, kConstructStubOffset)
 ACCESSORS(SharedFunctionInfo, feedback_vector, TypeFeedbackVector,
           kFeedbackVectorOffset)
+ACCESSORS(SharedFunctionInfo, outer_info, SharedFunctionInfo,
+          kOuterInfoOffset)
+ACCESSORS(SharedFunctionInfo, inner_infos, FixedArray, kInnerInfosOffset)
 #if TRACE_MAPS
 SMI_ACCESSORS(SharedFunctionInfo, unique_id, kUniqueIdOffset)
 #endif
@@ -5624,6 +5635,10 @@ BOOL_ACCESSORS(SharedFunctionInfo,
                compiler_hints,
                allows_lazy_compilation_without_context,
                kAllowLazyCompilationWithoutContext)
+BOOL_ACCESSORS(SharedFunctionInfo,
+               compiler_hints,
+               has_saved_optimized_code,
+               kHasSavedOptimizedCode)
 BOOL_ACCESSORS(SharedFunctionInfo,
                compiler_hints,
                uses_arguments,
@@ -6062,6 +6077,7 @@ void JSFunction::ReplaceCode(Code* code) {
   if (was_optimized && is_optimized) {
     shared()->EvictFromOptimizedCodeMap(this->code(),
         "Replacing with another optimized code");
+    shared()->DiscardSavedOptimizedCode("Replacing with another optimized code");
   }
 
   set_code(code);

@@ -2675,6 +2675,7 @@ static bool IsInteger32(double value) {
 HConstant::HConstant(Handle<Object> object, Representation r)
     : HTemplateInstruction<0>(HType::FromValue(object)),
       object_(Unique<Object>::CreateUninitialized(object)),
+      is_builtin_(false),
       object_map_(Handle<Map>::null()),
       bit_field_(HasStableMapValueField::encode(false) |
                  HasSmiValueField::encode(false) |
@@ -2839,6 +2840,7 @@ void HConstant::Initialize(Representation r) {
   }
   set_representation(r);
   SetFlag(kUseGVN);
+  code_relocation_data_.type = kUninitialized;
 }
 
 

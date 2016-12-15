@@ -586,7 +586,9 @@ class ParserTraits {
       FunctionLiteral::ArityRestriction arity_restriction, bool* ok);
   V8_INLINE void SkipLazyFunctionBody(const AstRawString* name,
                                       int* materialized_literal_count,
-                                      int* expected_property_count, bool* ok);
+                                      int* expected_property_count,
+                                      int* inner_function_count,
+                                      bool* ok);
   V8_INLINE ZoneList<Statement*>* ParseEagerFunctionBody(
       const AstRawString* name, int pos, Variable* fvar,
       Token::Value fvar_init_op, bool is_generator, bool* ok);
@@ -813,6 +815,7 @@ class Parser : public ParserBase<ParserTraits> {
   void SkipLazyFunctionBody(const AstRawString* function_name,
                             int* materialized_literal_count,
                             int* expected_property_count,
+                            int* inner_function_count,
                             bool* ok);
 
   PreParser::PreParseResult ParseLazyFunctionBodyWithPreParser(
@@ -874,9 +877,11 @@ const AstRawString* ParserTraits::EmptyIdentifierString() {
 void ParserTraits::SkipLazyFunctionBody(const AstRawString* function_name,
                                         int* materialized_literal_count,
                                         int* expected_property_count,
+                                        int* inner_function_count,
                                         bool* ok) {
   return parser_->SkipLazyFunctionBody(
-      function_name, materialized_literal_count, expected_property_count, ok);
+      function_name, materialized_literal_count, expected_property_count,
+      inner_function_count, ok);
 }
 
 

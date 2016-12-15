@@ -1479,8 +1479,8 @@ bool Genesis::CompileScriptCached(Isolate* isolate,
 }
 
 
-static Handle<JSObject> ResolveBuiltinIdHolder(Handle<Context> native_context,
-                                               const char* holder_expr) {
+Handle<JSObject> ResolveBuiltinIdHolder(Handle<Context> native_context,
+                                        const char* holder_expr) {
   Isolate* isolate = native_context->GetIsolate();
   Factory* factory = isolate->factory();
   Handle<GlobalObject> global(native_context->global_object());
@@ -1508,6 +1508,18 @@ static Handle<JSObject> ResolveBuiltinIdHolder(Handle<Context> native_context,
   Handle<Object> value =
       Object::GetProperty(object, inner_string).ToHandleChecked();
   return Handle<JSObject>::cast(value);
+}
+
+
+Handle<JSFunction> ResolveBuiltinFunction(Handle<Context> native_context,
+                                          const char* holder_expr,
+                                          const char* function_name) {
+  Handle<JSObject> holder =
+    ResolveBuiltinIdHolder(native_context, holder_expr);
+  Isolate* isolate = holder->GetIsolate();
+  Handle<Object> function_object =
+      Object::GetProperty(isolate, holder, function_name).ToHandleChecked();
+  return Handle<JSFunction>::cast(function_object);
 }
 
 
@@ -2195,25 +2207,14 @@ bool Genesis::InstallExperimentalNatives() {
 }
 
 
-static void InstallBuiltinFunctionId(Handle<JSObject> holder,
-                                     const char* function_name,
-                                     BuiltinFunctionId id) {
-  Isolate* isolate = holder->GetIsolate();
-  Handle<Object> function_object =
-      Object::GetProperty(isolate, holder, function_name).ToHandleChecked();
-  Handle<JSFunction> function = Handle<JSFunction>::cast(function_object);
-  function->shared()->set_function_data(Smi::FromInt(id));
-}
-
-
 void Genesis::InstallBuiltinFunctionIds() {
   HandleScope scope(isolate());
-#define INSTALL_BUILTIN_ID(holder_expr, fun_name, name) \
-  {                                                     \
-    Handle<JSObject> holder = ResolveBuiltinIdHolder(   \
-        native_context(), #holder_expr);                \
-    BuiltinFunctionId id = k##name;                     \
-    InstallBuiltinFunctionId(holder, #fun_name, id);    \
+#define INSTALL_BUILTIN_ID(holder_expr, fun_name, name)      \
+  {                                                          \
+    Handle<JSFunction> function = ResolveBuiltinFunction(    \
+        native_context(), #holder_expr, #fun_name);          \
+    BuiltinFunctionId id = k##name;                          \
+    function->shared()->set_function_data(Smi::FromInt(id)); \
   }
   FUNCTIONS_WITH_ID_LIST(INSTALL_BUILTIN_ID)
 #undef INSTALL_BUILTIN_ID

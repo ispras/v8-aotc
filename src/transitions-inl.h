@@ -153,7 +153,6 @@ int TransitionArray::SearchName(Name* name, int* out_insertion_index) {
 }
 
 
-#ifdef DEBUG
 bool TransitionArray::IsSpecialTransition(Name* name) {
   if (!name->IsSymbol()) return false;
   Heap* heap = name->GetHeap();
@@ -161,7 +160,6 @@ bool TransitionArray::IsSpecialTransition(Name* name) {
          name == heap->elements_transition_symbol() ||
          name == heap->observed_symbol();
 }
-#endif
 
 
 int TransitionArray::CompareKeys(Name* key1, uint32_t hash1,

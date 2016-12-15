@@ -1104,6 +1104,15 @@ class Isolate {
   BasicBlockProfiler* GetOrCreateBasicBlockProfiler();
   BasicBlockProfiler* basic_block_profiler() { return basic_block_profiler_; }
 
+  void AddJSFunctionForStartPosition(int start_position,
+                                     Handle<JSFunction> function) {
+    DCHECK(function->context()->IsNativeContext());
+    AddForStartPosition(jsfunctions_by_start_position_, start_position, function);
+  }
+  Handle<JSFunction> GetJSFunctionByStartPosition(int start_position) {
+    return GetByStartPosition(jsfunctions_by_start_position_, start_position);
+  }
+
   static Isolate* NewForTesting() { return new Isolate(false); }
 
   std::string GetTurboCfgFileName();
@@ -1323,6 +1332,19 @@ class Isolate {
 
   v8::Isolate::UseCounterCallback use_counter_callback_;
   BasicBlockProfiler* basic_block_profiler_;
+
+  template<typename T>
+  struct ByStartPosition {
+    int start_position;
+    Handle<T> value;
+  };
+
+  template<typename T>
+  void AddForStartPosition(List<ByStartPosition<T>>&, int, Handle<T>);
+  template<typename T>
+  Handle<T> GetByStartPosition(List<ByStartPosition<T>>&, int);
+
+  List<ByStartPosition<JSFunction>> jsfunctions_by_start_position_;
 
   friend class ExecutionAccess;
   friend class HandleScopeImplementer;

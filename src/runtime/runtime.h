@@ -88,6 +88,7 @@ namespace internal {
   F(LoadMutableDouble, 2, 1)                               \
   F(TryMigrateInstance, 1, 1)                              \
   F(NotifyContextDisposed, 0, 1)                           \
+  F(AddJSFunctionForStartPosition, 1, 1)                   \
                                                            \
   /* Array join support */                                 \
   F(PushIfAbsent, 2, 1)                                    \

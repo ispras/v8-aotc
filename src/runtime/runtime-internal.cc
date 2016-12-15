@@ -278,5 +278,24 @@ RUNTIME_FUNCTION(RuntimeReference_GetFromCache) {
   args[0] = isolate->native_context()->jsfunction_result_caches()->get(id);
   return __RT_impl_Runtime_GetFromCache(args, isolate);
 }
+
+
+RUNTIME_FUNCTION(Runtime_AddJSFunctionForStartPosition) {
+  DCHECK(args.length() == 1);
+  HandleScope scope(isolate);
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, jsf, 0);
+  auto result = isolate->heap()->undefined_value();
+
+  if (!jsf->context()->IsNativeContext()) {
+    return result;
+  }
+
+  auto globalized_jsf = Handle<JSFunction>::cast(
+      isolate->global_handles()->Create(*jsf));
+  int start_position = jsf->shared()->start_position();
+  isolate->AddJSFunctionForStartPosition(start_position, globalized_jsf);
+
+  return result;
+}
 }
 }  // namespace v8::internal

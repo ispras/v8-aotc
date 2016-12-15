@@ -816,6 +816,8 @@ class ExternalReference BASE_EMBEDDED {
 
   ExternalReference() : address_(NULL) {}
 
+  ExternalReference(Address address) : address_(address) {}
+
   ExternalReference(Builtins::CFunctionId id, Isolate* isolate);
 
   ExternalReference(ApiFunction* ptr, Type type, Isolate* isolate);

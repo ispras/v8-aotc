@@ -82,6 +82,8 @@ class Scope: public ZoneObject {
 
   static Scope* DeserializeScopeChain(Context* context, Scope* script_scope,
                                       Zone* zone);
+  static Scope* DeserializeScopeChain(Handle<SharedFunctionInfo> shared_info,
+                                      Scope* script_scope, Zone* zone);
 
   // The scope name is only used for printing/debugging.
   void SetScopeName(const AstRawString* scope_name) {

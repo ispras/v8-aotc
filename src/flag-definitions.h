@@ -152,6 +152,11 @@ struct MaybeBoolFlag {
 //
 #define FLAG FLAG_FULL
 
+// AOTC flags.
+DEFINE_STRING(saveload_filter, "*", "saveload filter")
+DEFINE_STRING(save_code, nullptr, "file to save generated code to")
+DEFINE_STRING(load_code, nullptr, "file to load generated code from")
+
 // Flags for language modes and experimental language features.
 DEFINE_BOOL(use_strict, false, "enforce strict mode")
 
@@ -409,6 +414,7 @@ DEFINE_IMPLICATION(trace_opt_verbose, trace_opt)
 // assembler-ia32.cc / assembler-arm.cc / assembler-x64.cc
 DEFINE_BOOL(debug_code, false, "generate extra code (assertions) for debugging")
 DEFINE_BOOL(code_comments, false, "emit comments in code disassembly")
+DEFINE_BOOL(lithium_codegen_comments, false, "emit comments for each lithium instruction")
 DEFINE_BOOL(enable_sse3, true, "enable use of SSE3 instructions if available")
 DEFINE_BOOL(enable_sse4_1, true,
             "enable use of SSE4.1 instructions if available")
@@ -480,6 +486,10 @@ DEFINE_BOOL(serialize_toplevel, true, "enable caching of toplevel scripts")
 DEFINE_BOOL(trace_code_serializer, false, "print code serializer trace")
 
 // compiler.cc
+DEFINE_BOOL(trace_saveload, false, "trace optimized code save/load events")
+DEFINE_BOOL(trace_saveload_code, false,
+            "trace optimized code save/load events and print Lithium code")
+DEFINE_IMPLICATION(trace_saveload_code, trace_saveload)
 DEFINE_INT(min_preparse_length, 1024,
            "minimum length for automatic enable preparsing")
 DEFINE_INT(max_opt_count, 10,
@@ -736,6 +746,20 @@ DEFINE_BOOL(force_marking_deque_overflows, false,
 DEFINE_BOOL(stress_compaction, false,
             "stress the GC compactor to flush out bugs (implies "
             "--force_marking_deque_overflows)")
+
+// Saveload dev flags.
+DEFINE_BOOL(saveload_dev, false, "enable a bunch of flags for saveload development")
+DEFINE_NEG_IMPLICATION(saveload_dev, concurrent_recompilation)
+DEFINE_NEG_IMPLICATION(saveload_dev, concurrent_osr)
+DEFINE_VALUE_IMPLICATION(saveload_dev, max_inlined_nodes, -1)
+DEFINE_IMPLICATION(saveload_dev, code_comments)
+DEFINE_IMPLICATION(saveload_dev, lithium_codegen_comments)
+
+DEFINE_BOOL(saveload_edge, false, "enable a bunch of flags for saveload development")
+DEFINE_NEG_IMPLICATION(saveload_edge, concurrent_recompilation)
+DEFINE_NEG_IMPLICATION(saveload_edge, concurrent_osr)
+DEFINE_IMPLICATION(saveload_edge, code_comments)
+DEFINE_IMPLICATION(saveload_edge, lithium_codegen_comments)
 
 //
 // Debug only flags

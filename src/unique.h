@@ -329,6 +329,10 @@ class UniqueSet FINAL : public ZoneObject {
     return array_[index];
   }
 
+  typedef Unique<T>* iterator;
+  iterator begin() const { return array_; }
+  iterator end() const { return array_ + size_; }
+
  private:
   // These sets should be small, since operations are implemented with simple
   // linear algorithms. Enforce a maximum size.

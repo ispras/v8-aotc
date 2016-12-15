@@ -5386,6 +5386,7 @@ void HOptimizedGraphBuilder::VisitVariableProxy(VariableProxy* expr) {
       }
 
       Handle<GlobalObject> global(current_info()->global_object());
+      bool builtin = global.is_identical_to(isolate()->js_builtins_object());
 
       if (FLAG_harmony_scoping) {
         Handle<ScriptContextTable> script_contexts(
@@ -5416,10 +5417,13 @@ void HOptimizedGraphBuilder::VisitVariableProxy(VariableProxy* expr) {
                 String::Flatten(Handle<String>::cast(constant_object));
           }
           HConstant* constant = New<HConstant>(constant_object);
+          constant->SetName(variable->name());
+          constant->IsBuiltin(builtin);
           return ast_context()->ReturnInstruction(constant, expr->id());
         } else {
           HLoadGlobalCell* instr =
-              New<HLoadGlobalCell>(cell, it.property_details());
+            New<HLoadGlobalCell>(cell, variable->name(),
+                                 it.property_details());
           return ast_context()->ReturnInstruction(instr, expr->id());
         }
       } else {
@@ -5776,9 +5780,17 @@ void HOptimizedGraphBuilder::VisitArrayLiteral(ArrayLiteral* expr) {
     usage_context.ExitScope(site, boilerplate_object);
   } else {
     NoObservableSideEffectsScope no_effects(this);
-    // Boilerplate already exists and constant elements are never accessed,
-    // pass an empty fixed array to the runtime function instead.
-    Handle<FixedArray> constants = isolate()->factory()->empty_fixed_array();
+
+    Handle<FixedArray> constants;
+    if (!FLAG_save_code) {
+      // Boilerplate already exists and constant elements are never accessed,
+      // pass an empty fixed array to the runtime function instead.
+      constants = isolate()->factory()->empty_fixed_array();
+    } else {
+      // Propagate constant elements through Hydrogen for saveload.
+      constants = expr->constant_elements();
+    }
+
     int literal_index = expr->literal_index();
     int flags = expr->depth() == 1
         ? ArrayLiteral::kShallowElements
@@ -6588,7 +6600,7 @@ void HOptimizedGraphBuilder::HandleGlobalVariableAssignment(
       }
     }
     HInstruction* instr =
-        Add<HStoreGlobalCell>(value, cell, it.property_details());
+      Add<HStoreGlobalCell>(value, cell, var->name(), it.property_details());
     if (instr->HasObservableSideEffects()) {
       Add<HSimulate>(ast_id, REMOVABLE_SIMULATE);
     }
@@ -7548,6 +7560,7 @@ HInstruction* HOptimizedGraphBuilder::NewArgumentAdaptorCall(
   Handle<Code> adaptor =
       isolate()->builtins()->ArgumentsAdaptorTrampoline();
   HConstant* adaptor_value = Add<HConstant>(adaptor);
+  adaptor_value->SetArgumentsAdaptorCodeRelocation();
 
   return New<HCallWithDescriptor>(
       adaptor_value, argument_count, descriptor,
@@ -7995,6 +8008,7 @@ bool HOptimizedGraphBuilder::TryInline(Handle<JSFunction> target,
                                      function_state()->inlining_kind());
 
   HConstant* context = Add<HConstant>(Handle<Context>(target->context()));
+  context->SetContextOwner(target);
   inner_env->BindContext(context);
 
   // Create a dematerialized arguments object for the function, also copy the
@@ -8789,6 +8803,8 @@ bool HOptimizedGraphBuilder::TryInlineApiCall(Handle<JSFunction> function,
   CallApiFunctionStub stub(isolate(), is_store, call_data_is_undefined, argc);
   Handle<Code> code = stub.GetCode();
   HConstant* code_value = Add<HConstant>(code);
+  code_value->SetApiFunctionStubCodeRelocation(is_store,
+                                               call_data_is_undefined, argc);
 
   DCHECK((sizeof(op_vals) / kPointerSize) == descriptor.GetEnvironmentLength());
 

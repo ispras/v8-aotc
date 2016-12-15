@@ -1376,6 +1376,17 @@ Handle<JSFunction> Factory::NewFunctionFromSharedFunctionInfo(
   Handle<Map> map(Map::cast(context->native_context()->get(map_index)));
   Handle<JSFunction> result = NewFunction(map, info, context, pretenure);
 
+  if (Script::cast(info->script())->type()->value() == Script::TYPE_NORMAL) {
+    // Can't preserve the local handle past enclosing handle scope.
+    auto function =
+      Handle<JSFunction>::cast(isolate()->global_handles()->Create(*result));
+    if (context->IsNativeContext()) {
+      // It won't work for other contexts. Don't even try.
+      isolate()->AddJSFunctionForStartPosition(info->start_position(),
+                                               function);
+    }
+  }
+
   if (info->ic_age() != isolate()->heap()->global_ic_age()) {
     info->ResetForNewContext(isolate()->heap()->global_ic_age());
   }
@@ -1419,6 +1430,10 @@ Handle<JSFunction> Factory::NewFunctionFromSharedFunctionInfo(
 
 
 Handle<ScopeInfo> Factory::NewScopeInfo(int length) {
+  if (!length) {
+    // Avoid changing the map of singleton empty_fixed_array instance.
+    return handle(ScopeInfo::Empty(isolate()));
+  }
   Handle<FixedArray> array = NewFixedArray(length, TENURED);
   array->set_map_no_write_barrier(*scope_info_map());
   Handle<ScopeInfo> scope_info = Handle<ScopeInfo>::cast(array);
@@ -2015,14 +2030,16 @@ Handle<TypeFeedbackVector> Factory::NewTypeFeedbackVector(int slot_count,
 
 
 Handle<SharedFunctionInfo> Factory::NewSharedFunctionInfo(
-    Handle<String> name, int number_of_literals, FunctionKind kind,
-    Handle<Code> code, Handle<ScopeInfo> scope_info,
+    Handle<String> name, int number_of_literals, int inner_function_count,
+    FunctionKind kind, MaybeHandle<Code> code, Handle<ScopeInfo> scope_info,
     Handle<TypeFeedbackVector> feedback_vector) {
   DCHECK(IsValidFunctionKind(kind));
   Handle<SharedFunctionInfo> shared = NewSharedFunctionInfo(name, code);
   shared->set_scope_info(*scope_info);
   shared->set_feedback_vector(*feedback_vector);
   shared->set_kind(kind);
+  Handle<FixedArray> inner_infos = NewFixedArray(inner_function_count);
+  shared->set_inner_infos(*inner_infos);
   int literals_array_size = number_of_literals;
   // If the function contains object, regexp or array literals,
   // allocate extra space for a literals array prefix containing the
@@ -2087,6 +2104,8 @@ Handle<SharedFunctionInfo> Factory::NewSharedFunctionInfo(
   share->set_inferred_name(*empty_string(), SKIP_WRITE_BARRIER);
   Handle<TypeFeedbackVector> feedback_vector = NewTypeFeedbackVector(0, 0);
   share->set_feedback_vector(*feedback_vector, SKIP_WRITE_BARRIER);
+  share->set_outer_info(nullptr, SKIP_WRITE_BARRIER);
+  share->set_inner_infos(nullptr, SKIP_WRITE_BARRIER);
 #if TRACE_MAPS
   share->set_unique_id(isolate()->GetNextUniqueSharedFunctionInfoId());
 #endif

@@ -9333,6 +9333,17 @@ bool Map::EquivalentToForNormalization(Map* other,
 }
 
 
+// Basically CheckEquivalent + check all saved properties.
+bool Map::EquivalentToForDeduplication(Map* other) {
+  return CheckEquivalent(this, other) &&
+    this->instance_size() == other->instance_size() &&
+    this->inobject_properties() == other->inobject_properties() &&
+    this->unused_property_fields() == other->unused_property_fields() &&
+    this->bit_field3() == other->bit_field3() &&
+    this->NumberOfOwnDescriptors() == other->NumberOfOwnDescriptors();
+}
+
+
 void ConstantPoolArray::ConstantPoolIterateBody(ObjectVisitor* v) {
   // Unfortunately the serializer relies on pointers within an object being
   // visited in-order, so we have to iterate both the code and heap pointers in
@@ -9584,6 +9595,28 @@ void SharedFunctionInfo::EvictFromOptimizedCodeMap(Code* optimized_code,
     // Always trim even when array is cleared because of heap verifier.
     GetHeap()->RightTrimFixedArray<Heap::FROM_MUTATOR>(code_map, length - dst);
     if (code_map->length() == kEntriesStart) ClearOptimizedCodeMap();
+  }
+}
+
+
+void SharedFunctionInfo::DiscardSavedOptimizedCode(const char* reason) {
+  if (FLAG_save_code) {
+    if (!Compiler::DiscardCodeFromCodeBlockDatabase(start_position())) {
+      return;
+    }
+  }
+
+  if (FLAG_load_code) {
+    if (!has_saved_optimized_code()) {
+      return;
+    }
+    set_has_saved_optimized_code(false);
+  }
+
+  if (FLAG_trace_saveload) {
+    PrintF("[discarding saved optimized code (%s) for ", reason);
+    ShortPrint();
+    PrintF(" at start position %d]\n", start_position());
   }
 }
 
@@ -9842,33 +9875,8 @@ Context* JSFunction::NativeContextFromLiterals(FixedArray* literals) {
 }
 
 
-// The filter is a pattern that matches function names in this way:
-//   "*"      all; the default
-//   "-"      all but the top-level function
-//   "-name"  all but the function "name"
-//   ""       only the top-level function
-//   "name"   only the function "name"
-//   "name*"  only functions starting with "name"
-//   "~"      none; the tilde is not an identifier
-bool JSFunction::PassesFilter(const char* raw_filter) {
-  if (*raw_filter == '*') return true;
-  String* name = shared()->DebugName();
-  Vector<const char> filter = CStrVector(raw_filter);
-  if (filter.length() == 0) return name->length() == 0;
-  if (filter[0] == '-') {
-    // Negative filter.
-    if (filter.length() == 1) {
-      return (name->length() != 0);
-    } else if (name->IsUtf8EqualTo(filter.SubVector(1, filter.length()))) {
-      return false;
-    }
-    if (filter[filter.length() - 1] == '*' &&
-        name->IsUtf8EqualTo(filter.SubVector(1, filter.length() - 1), true)) {
-      return false;
-    }
-    return true;
-
-  } else if (name->IsUtf8EqualTo(filter)) {
+static bool NamePassesFilter(String* name, Vector<const char> filter) {
+  if (name->IsUtf8EqualTo(filter)) {
     return true;
   }
   if (filter[filter.length() - 1] == '*' &&
@@ -9876,6 +9884,45 @@ bool JSFunction::PassesFilter(const char* raw_filter) {
     return true;
   }
   return false;
+}
+
+
+// The filter is a pattern that matches function names in this way:
+//   "*"             all; the default
+//   "-"             all but the top-level function
+//   "-name"         all but the function "name"
+//   ""              only the top-level function
+//   "name"          only the function "name"
+//   "name*"         only functions starting with "name"
+//   "~"             none; the tilde is not an identifier
+//   "name1,name2"   names can be combined with commas
+//   "-name1,name2"
+bool JSFunction::PassesFilter(const char* raw_filter) {
+  if (*raw_filter == '*') return true;
+  String* name = shared()->DebugName();
+  Vector<const char> filter = CStrVector(raw_filter);
+  if (filter.length() == 0) return name->length() == 0;
+  if (filter.length() == 1 && filter[0] == '-') return name->length() != 0;
+
+  int begin = 0;
+  bool result_if_matched = true;
+  if (filter[0] == '-') {
+    // Negative filter.
+    begin = 1;
+    result_if_matched = false;
+  }
+
+  while (begin < filter.length()) {
+    int end = begin;
+    while (end < filter.length() && filter[end] != ',') {
+      end += 1;
+    }
+    if (NamePassesFilter(name, filter.SubVector(begin, end))) {
+      return result_if_matched;
+    }
+    begin = end + 1;
+  }
+  return !result_if_matched;
 }
 
 

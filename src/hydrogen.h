@@ -45,6 +45,7 @@ class HBasicBlock FINAL : public ZoneObject {
   const ZoneList<HPhi*>* phis() const { return &phis_; }
   HInstruction* first() const { return first_; }
   HInstruction* last() const { return last_; }
+  void set_first(HInstruction* instr) { first_ = instr; }
   void set_last(HInstruction* instr) { last_ = instr; }
   HControlInstruction* end() const { return end_; }
   HLoopInformation* loop_information() const { return loop_information_; }
@@ -361,13 +362,21 @@ class HGraph FINAL : public ZoneObject {
   int GetMaximumValueID() const { return values_.length(); }
   int GetNextBlockID() { return next_block_id_++; }
   int GetNextValueID(HValue* value) {
-    DCHECK(!disallow_adding_new_values_);
-    values_.Add(value, zone());
+    AddValue(value);
     return values_.length() - 1;
   }
   HValue* LookupValue(int id) const {
     if (id >= 0 && id < values_.length()) return values_[id];
     return NULL;
+  }
+  void AddValue(HValue* value) {
+    DCHECK(!disallow_adding_new_values_);
+    values_.Add(value, zone());
+  }
+  void SetValue(int id, HValue* value) {
+    DCHECK(id >= 0 && id < values_.length());
+    DCHECK(!values_[id]); // Don't overwrite.
+    values_[id] = value;
   }
   void DisallowAddingNewValues() {
     disallow_adding_new_values_ = true;

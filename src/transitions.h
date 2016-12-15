@@ -102,6 +102,9 @@ class TransitionArray: public FixedArray {
   int Search(PropertyType type, Name* name, PropertyAttributes attributes,
              int* out_insertion_index = NULL);
 
+  // Search a transition for a given target map.
+  int SearchTarget(Handle<Map> target);
+
   // Search a non-property transition (like elements kind, observe or frozen
   // transitions).
   inline int SearchSpecial(Symbol* symbol, int* out_insertion_index = NULL) {
@@ -175,11 +178,12 @@ class TransitionArray: public FixedArray {
   bool IsSortedNoDuplicates(int valid_entries = -1);
   bool IsConsistentWithBackPointers(Map* current_map);
   bool IsEqualTo(TransitionArray* other);
+#endif
 
   // Returns true for a non-property transitions like elements kind, observed
   // or frozen transitions.
+  // Used in save-load for transitions serialization.
   static inline bool IsSpecialTransition(Name* name);
-#endif
 
   // The maximum number of transitions we want in a transition array (should
   // fit in a page).

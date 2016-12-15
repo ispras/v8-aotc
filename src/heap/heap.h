@@ -1117,11 +1117,13 @@ class Heap {
     SMI_ROOT_LIST(ROOT_INDEX_DECLARATION)
 #undef ROOT_INDEX_DECLARATION
     kRootListLength,
+    kNotFound = kRootListLength,
     kStrongRootListLength = kStringTableRootIndex,
     kSmiRootsStart = kStringTableRootIndex + 1
   };
 
   Object* root(RootListIndex index) { return roots_[index]; }
+  RootListIndex RootIndex(Object* object);
 
   STATIC_ASSERT(kUndefinedValueRootIndex ==
                 Internals::kUndefinedValueRootIndex);

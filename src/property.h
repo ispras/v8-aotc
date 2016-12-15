@@ -16,6 +16,8 @@
 namespace v8 {
 namespace internal {
 
+class LChunkLoaderBase;
+
 // Abstraction for elements in instance-descriptor arrays.
 //
 // Each descriptor has a key, property attributes, property type,
@@ -67,6 +69,7 @@ class Descriptor BASE_EMBEDDED {
 
   friend class DescriptorArray;
   friend class Map;
+  friend class LChunkLoaderBase;
 };
 
 

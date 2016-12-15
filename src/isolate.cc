@@ -2507,6 +2507,38 @@ BasicBlockProfiler* Isolate::GetOrCreateBasicBlockProfiler() {
 }
 
 
+template<typename T>
+void Isolate::AddForStartPosition(List<ByStartPosition<T>>& list,
+                                  int start_position,
+                                  Handle<T> value) {
+  for (auto& rec: list) {
+    if (rec.start_position == start_position) {
+      rec.value = value;
+      return;
+    }
+  }
+
+  list.Add(ByStartPosition<T>{ start_position, value });
+}
+
+
+template<typename T>
+Handle<T> Isolate::GetByStartPosition(List<ByStartPosition<T>>& list,
+                                      int start_position) {
+  for (auto& rec: list) {
+    if (rec.start_position == start_position) {
+      return rec.value;
+    }
+  }
+  return Handle<T>::null();
+}
+
+
+// Instantiate.
+template void Isolate::AddForStartPosition<JSFunction>(List<ByStartPosition<JSFunction>>&, int, Handle<JSFunction>);
+template Handle<JSFunction> Isolate::GetByStartPosition(List<ByStartPosition<JSFunction>>&, int);
+
+
 std::string Isolate::GetTurboCfgFileName() {
   if (FLAG_trace_turbo_cfg_file == NULL) {
     std::ostringstream os;

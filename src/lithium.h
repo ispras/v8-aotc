@@ -10,11 +10,18 @@
 #include "src/allocation.h"
 #include "src/bailout-reason.h"
 #include "src/hydrogen.h"
+#include "src/hydrogen-shim.h"
+#include "src/lithium-saveload.h"
 #include "src/safepoint-table.h"
 #include "src/zone-allocator.h"
 
 namespace v8 {
 namespace internal {
+
+// Forward declarations.
+class LChunkSaverBase;
+class LChunkLoaderBase;
+
 
 #define LITHIUM_OPERAND_LIST(V)               \
   V(ConstantOperand, CONSTANT_OPERAND,  128)  \
@@ -66,6 +73,9 @@ class LOperand : public ZoneObject {
   LOperand(Kind kind, int index) { ConvertTo(kind, index); }
 
   unsigned value_;
+
+  friend class LChunkSaverBase;
+  friend class LChunkLoaderBase;
 };
 
 
@@ -344,6 +354,7 @@ class LParallelMove FINAL : public ZoneObject {
   bool IsRedundant() const;
 
   ZoneList<LMoveOperands>* move_operands() { return &move_operands_; }
+  const ZoneList<LMoveOperands>* move_operands() const { return &move_operands_; }
 
   void PrintDataTo(StringStream* stream) const;
 
@@ -382,6 +393,9 @@ class LPointerMap FINAL : public ZoneObject {
   ZoneList<LOperand*> pointer_operands_;
   ZoneList<LOperand*> untagged_operands_;
   int lithium_position_;
+
+  friend class LChunkSaverBase;
+  friend class LChunkLoaderBase;
 };
 
 
@@ -508,6 +522,9 @@ class LEnvironment FINAL : public ZoneObject {
   class IsDuplicateField  : public BitField<bool, 31,  1> { };
 
  private:
+  friend class LChunkSaverBase;
+  friend class LChunkLoaderBase;
+
   Handle<JSFunction> closure_;
   FrameType frame_type_;
   int arguments_stack_height_;
@@ -622,16 +639,22 @@ class LChunk : public ZoneObject {
 
   void AddInstruction(LInstruction* instruction, HBasicBlock* block);
   LConstantOperand* DefineConstantOperand(HConstant* constant);
-  HConstant* LookupConstant(LConstantOperand* operand) const;
+  HValueShim* GetValue(int index);
+  void SetValue(int index, HValueShim* value);
+  HConstantShim* LookupConstant(LConstantOperand* operand);
   Representation LookupLiteralRepresentation(LConstantOperand* operand) const;
 
   int ParameterAt(int index);
   int GetParameterStackSlot(int index) const;
+
   int spill_slot_count() const { return spill_slot_count_; }
+  void set_spill_slot_count(int count) { spill_slot_count_ = count; }
+
   CompilationInfo* info() const { return info_; }
   HGraph* graph() const { return graph_; }
   Isolate* isolate() const { return graph_->isolate(); }
   const ZoneList<LInstruction*>* instructions() const { return &instructions_; }
+  void AddInstruction(LInstruction* instr) { instructions_.Add(instr, zone()); }
   void AddGapMove(int index, LOperand* from, LOperand* to);
   LGap* GetGapAt(int index) const;
   bool IsGapAt(int index) const;
@@ -687,12 +710,33 @@ class LChunk : public ZoneObject {
 
   CompilationInfo* info_;
   HGraph* const graph_;
+  ZoneList<HValueShim*> values_;
   BitVector* allocated_double_registers_;
   ZoneList<LInstruction*> instructions_;
   ZoneList<LPointerMap*> pointer_maps_;
   ZoneList<Handle<JSFunction> > inlined_closures_;
   MapSet deprecation_dependencies_;
   MapSet stability_dependencies_;
+};
+
+
+class LSavedChunk {
+ public:
+  LSavedChunk() {}
+
+  LSavedChunk(Vector<const char> code) {
+    bytes_.AddAll(code);
+  }
+
+  bool Save(LChunk* chunk);
+  LChunk* Load(CompilationInfo* info) const;
+  Vector<const char> GetCode() { return bytes_.Detach(); }
+
+  const char* Reason() const { return reason_; }
+
+ private:
+  List<char> bytes_;
+  mutable const char* reason_;
 };
 
 

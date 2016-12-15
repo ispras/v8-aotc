@@ -47,6 +47,8 @@ class HOsrBuilder : public ZoneObject {
   HBasicBlock* osr_entry_;
   HBasicBlock* osr_loop_entry_;
   ZoneList<HUnknownOSRValue*>* osr_values_;
+
+  friend class LChunkLoader;
 };
 
 } }  // namespace v8::internal

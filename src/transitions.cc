@@ -226,4 +226,17 @@ int TransitionArray::Search(PropertyType type, Name* name,
   }
   return SearchDetails(transition, type, attributes, out_insertion_index);
 }
+
+
+int TransitionArray::SearchTarget(Handle<Map> target) {
+  int nof_transitions = number_of_transitions();
+  for (int transition = 0; transition < nof_transitions; ++transition) {
+    Map* transition_target = GetTarget(transition);
+    if (*target == transition_target) {
+      return transition;
+    }
+  }
+  return kNotFound;
+}
+
 } }  // namespace v8::internal

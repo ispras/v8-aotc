@@ -12,24 +12,31 @@
 #if V8_TARGET_ARCH_IA32
 #include "src/ia32/lithium-ia32.h"  // NOLINT
 #include "src/ia32/lithium-codegen-ia32.h"  // NOLINT
+#error "Unsupported target architecture."
 #elif V8_TARGET_ARCH_X64
 #include "src/x64/lithium-x64.h"  // NOLINT
 #include "src/x64/lithium-codegen-x64.h"  // NOLINT
+#include "src/x64/lithium-saveload-x64.h"  // NOLINT
 #elif V8_TARGET_ARCH_ARM
 #include "src/arm/lithium-arm.h"  // NOLINT
 #include "src/arm/lithium-codegen-arm.h"  // NOLINT
+#error "Unsupported target architecture."
 #elif V8_TARGET_ARCH_MIPS
 #include "src/mips/lithium-mips.h"  // NOLINT
 #include "src/mips/lithium-codegen-mips.h"  // NOLINT
+#error "Unsupported target architecture."
 #elif V8_TARGET_ARCH_ARM64
 #include "src/arm64/lithium-arm64.h"  // NOLINT
 #include "src/arm64/lithium-codegen-arm64.h"  // NOLINT
+#error "Unsupported target architecture."
 #elif V8_TARGET_ARCH_MIPS64
 #include "src/mips64/lithium-mips64.h"  // NOLINT
 #include "src/mips64/lithium-codegen-mips64.h"  // NOLINT
+#error "Unsupported target architecture."
 #elif V8_TARGET_ARCH_X87
 #include "src/x87/lithium-x87.h"  // NOLINT
 #include "src/x87/lithium-codegen-x87.h"  // NOLINT
+#error "Unsupported target architecture."
 #else
 #error "Unknown architecture."
 #endif
@@ -268,6 +275,7 @@ LChunk::LChunk(CompilationInfo* info, HGraph* graph)
     : spill_slot_count_(0),
       info_(info),
       graph_(graph),
+      values_(16, info->zone()),
       instructions_(32, info->zone()),
       pointer_maps_(8, info->zone()),
       inlined_closures_(1, info->zone()),
@@ -334,7 +342,7 @@ void LChunk::MarkEmptyBlocks() {
 
 void LChunk::AddInstruction(LInstruction* instr, HBasicBlock* block) {
   LInstructionGap* gap = new (zone()) LInstructionGap(block);
-  gap->set_hydrogen_value(instr->hydrogen_value());
+  gap->set_hydrogen_value(instr->hydrogen_value(), zone());
   int index = -1;
   if (instr->IsControl()) {
     instructions_.Add(gap, zone());
@@ -399,14 +407,47 @@ void LChunk::AddGapMove(int index, LOperand* from, LOperand* to) {
 }
 
 
-HConstant* LChunk::LookupConstant(LConstantOperand* operand) const {
-  return HConstant::cast(graph_->LookupValue(operand->index()));
+HValueShim* LChunk::GetValue(int index) {
+  DCHECK(index < values_.length() && values_[index]);
+  return values_[index];
+}
+
+
+void LChunk::SetValue(int index, HValueShim* value) {
+  if (index < values_.length()) {
+    values_.Set(index, value);
+  } else {
+    while (values_.length() < index) {
+      values_.Add(nullptr, zone());
+    }
+    values_.Add(value, zone());
+  }
+}
+
+
+HConstantShim* LChunk::LookupConstant(LConstantOperand* operand) {
+  int index = operand->index();
+  if (index < values_.length() && values_[index]) {
+    return HConstantShim::cast(values_[index]);
+  } else {
+    // Fall back to HGraph.
+    auto hconstant = HConstant::cast(graph_->LookupValue(index));
+    auto constant = new(zone()) HConstantShim(hconstant);
+    SetValue(index, constant);
+    return constant;
+  }
 }
 
 
 Representation LChunk::LookupLiteralRepresentation(
     LConstantOperand* operand) const {
-  return graph_->LookupValue(operand->index())->representation();
+  int index = operand->index();
+  if (index < values_.length() && values_[index]) {
+    return values_[index]->representation();
+  } else {
+    // Fall back to HGraph.
+    return graph_->LookupValue(index)->representation();
+  }
 }
 
 
@@ -453,7 +494,25 @@ LChunk* LChunk::NewChunk(HGraph* graph) {
 
   chunk->set_allocated_double_registers(
       allocator.assigned_double_registers());
+  return chunk;
+}
 
+
+bool LSavedChunk::Save(LChunk* chunk) {
+  DCHECK(chunk);
+  DCHECK(!bytes_.length());
+  LChunkSaver saver(bytes_, chunk->info());
+  saver.Save(chunk);
+  reason_ = saver.Reason();
+  return saver.LastStatus() == LChunkSaverBase::SUCCEEDED;
+}
+
+
+LChunk* LSavedChunk::Load(CompilationInfo* info) const {
+  LChunkLoader loader(bytes_, info);
+  LChunk* chunk = loader.Load();
+  reason_ = loader.Reason();
+  DCHECK(chunk || reason_);
   return chunk;
 }
 
@@ -666,6 +725,5 @@ LPhase::~LPhase() {
     isolate()->GetHTracer()->TraceLithium(name(), chunk_);
   }
 }
-
 
 } }  // namespace v8::internal

@@ -153,6 +153,8 @@
 namespace v8 {
 namespace internal {
 
+class LChunkLoaderBase;
+
 enum KeyedAccessStoreMode {
   STANDARD_STORE,
   STORE_TRANSITION_SMI_TO_OBJECT,
@@ -5796,6 +5798,7 @@ class Map: public HeapObject {
   inline int SearchSpecialTransition(Symbol* name);
   inline int SearchTransition(PropertyType type, Name* name,
                               PropertyAttributes attributes);
+  inline int SearchTransitionForTarget(Handle<Map> target);
   inline FixedArrayBase* GetInitialElements();
 
   DECL_ACCESSORS(transitions, TransitionArray)
@@ -6308,6 +6311,10 @@ class Map: public HeapObject {
   // The "shared" flags of both this map and |other| are ignored.
   bool EquivalentToForNormalization(Map* other, PropertyNormalizationMode mode);
 
+  // Compares this map to another to see if it can replace this map during
+  // deduplication.
+  bool EquivalentToForDeduplication(Map* other);
+
   // Returns true if given field is unboxed double.
   inline bool IsUnboxedDoubleField(FieldIndex index);
 
@@ -6404,6 +6411,8 @@ class Map: public HeapObject {
   static const int kMaxFastProperties = 128;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(Map);
+
+  friend class LChunkLoaderBase;
 };
 
 
@@ -6585,37 +6594,48 @@ class Script: public Struct {
 //
 // Installation of ids for the selected builtin functions is handled
 // by the bootstrapper.
-#define FUNCTIONS_WITH_ID_LIST(V)                   \
-  V(Array.prototype, indexOf, ArrayIndexOf)         \
-  V(Array.prototype, lastIndexOf, ArrayLastIndexOf) \
-  V(Array.prototype, push, ArrayPush)               \
-  V(Array.prototype, pop, ArrayPop)                 \
-  V(Array.prototype, shift, ArrayShift)             \
-  V(Function.prototype, apply, FunctionApply)       \
-  V(Function.prototype, call, FunctionCall)         \
-  V(String.prototype, charCodeAt, StringCharCodeAt) \
-  V(String.prototype, charAt, StringCharAt)         \
-  V(String, fromCharCode, StringFromCharCode)       \
-  V(Math, random, MathRandom)                       \
-  V(Math, floor, MathFloor)                         \
-  V(Math, round, MathRound)                         \
-  V(Math, ceil, MathCeil)                           \
-  V(Math, abs, MathAbs)                             \
-  V(Math, log, MathLog)                             \
-  V(Math, exp, MathExp)                             \
-  V(Math, sqrt, MathSqrt)                           \
-  V(Math, pow, MathPow)                             \
-  V(Math, max, MathMax)                             \
-  V(Math, min, MathMin)                             \
-  V(Math, cos, MathCos)                             \
-  V(Math, sin, MathSin)                             \
-  V(Math, tan, MathTan)                             \
-  V(Math, acos, MathAcos)                           \
-  V(Math, asin, MathAsin)                           \
-  V(Math, atan, MathAtan)                           \
-  V(Math, atan2, MathAtan2)                         \
-  V(Math, imul, MathImul)                           \
-  V(Math, clz32, MathClz32)                         \
+//
+// TODO: Save `subarray` by source name and remove the ids.
+#define FUNCTIONS_WITH_ID_LIST(V)                                       \
+  V(Array.prototype, indexOf, ArrayIndexOf)                             \
+  V(Array.prototype, lastIndexOf, ArrayLastIndexOf)                     \
+  V(Array.prototype, push, ArrayPush)                                   \
+  V(Array.prototype, pop, ArrayPop)                                     \
+  V(Array.prototype, shift, ArrayShift)                                 \
+  V(Uint8Array.prototype, subarray, Uint8ArraySubarray)                 \
+  V(Int8Array.prototype, subarray, Int8ArraySubarray)                   \
+  V(Uint16Array.prototype, subarray, Uint16ArraySubarray)               \
+  V(Int16Array.prototype, subarray, Int16ArraySubarray)                 \
+  V(Uint32Array.prototype, subarray, Uint32ArraySubarray)               \
+  V(Int32Array.prototype, subarray, Int32ArraySubarray)                 \
+  V(Float32Array.prototype, subarray, Float32ArraySubarray)             \
+  V(Float64Array.prototype, subarray, Float64ArraySubarray)             \
+  V(Uint8ClampedArray.prototype, subarray, Uint8ClampedArraySubarray)   \
+  V(Function.prototype, apply, FunctionApply)                           \
+  V(Function.prototype, call, FunctionCall)                             \
+  V(String.prototype, charCodeAt, StringCharCodeAt)                     \
+  V(String.prototype, charAt, StringCharAt)                             \
+  V(String, fromCharCode, StringFromCharCode)                           \
+  V(Math, random, MathRandom)                                           \
+  V(Math, floor, MathFloor)                                             \
+  V(Math, round, MathRound)                                             \
+  V(Math, ceil, MathCeil)                                               \
+  V(Math, abs, MathAbs)                                                 \
+  V(Math, log, MathLog)                                                 \
+  V(Math, exp, MathExp)                                                 \
+  V(Math, sqrt, MathSqrt)                                               \
+  V(Math, pow, MathPow)                                                 \
+  V(Math, max, MathMax)                                                 \
+  V(Math, min, MathMin)                                                 \
+  V(Math, cos, MathCos)                                                 \
+  V(Math, sin, MathSin)                                                 \
+  V(Math, tan, MathTan)                                                 \
+  V(Math, acos, MathAcos)                                               \
+  V(Math, asin, MathAsin)                                               \
+  V(Math, atan, MathAtan)                                               \
+  V(Math, atan2, MathAtan2)                                             \
+  V(Math, imul, MathImul)                                               \
+  V(Math, clz32, MathClz32)                                             \
   V(Math, fround, MathFround)
 
 enum BuiltinFunctionId {
@@ -6628,6 +6648,13 @@ enum BuiltinFunctionId {
   // list of math functions.
   kMathPowHalf
 };
+
+// Definitions in bootstrapper.cc.
+Handle<JSObject> ResolveBuiltinIdHolder(Handle<Context> native_context,
+                                        const char* holder_expr);
+Handle<JSFunction> ResolveBuiltinFunction(Handle<Context> native_context,
+                                          const char* holder_expr,
+                                          const char* function_name);
 
 
 // SharedFunctionInfo describes the JSFunction information that can be
@@ -6714,6 +6741,13 @@ class SharedFunctionInfo: public HeapObject {
   // (increasingly) from crankshafted code where sufficient feedback isn't
   // available.
   DECL_ACCESSORS(feedback_vector, TypeFeedbackVector)
+
+  // [outer_info]: Reference to the outer shared function info.
+  DECL_ACCESSORS(outer_info, SharedFunctionInfo)
+
+  // [inner_infos]: Fixed array holding references to shared function infos
+  // created for inner function literals.
+  DECL_ACCESSORS(inner_infos, FixedArray)
 
 #if TRACE_MAPS
   // [unique_id] - For --trace-maps purposes, an identifier that's persistent
@@ -6810,6 +6844,13 @@ class SharedFunctionInfo: public HeapObject {
   // the function through program execution but through other means (e.g. heap
   // iteration by the debugger).
   DECL_BOOLEAN_ACCESSORS(allows_lazy_compilation_without_context)
+
+  // Indicates whether this function should follow the pipeline for
+  // functions with precompiled and saved ahead-of-time optimized code.
+  DECL_BOOLEAN_ACCESSORS(has_saved_optimized_code)
+
+  // Discard saved code, probably due to deoptimizations.
+  void DiscardSavedOptimizedCode(const char* reason);
 
   // Indicates whether optimizations have been disabled for this
   // shared function info. If a function is repeatedly optimized or if
@@ -6975,11 +7016,13 @@ class SharedFunctionInfo: public HeapObject {
   static const int kInferredNameOffset = kDebugInfoOffset + kPointerSize;
   static const int kFeedbackVectorOffset =
       kInferredNameOffset + kPointerSize;
+  static const int kOuterInfoOffset = kFeedbackVectorOffset + kPointerSize;
+  static const int kInnerInfosOffset = kOuterInfoOffset + kPointerSize;
 #if TRACE_MAPS
-  static const int kUniqueIdOffset = kFeedbackVectorOffset + kPointerSize;
+  static const int kUniqueIdOffset = kInnerInfosOffset + kPointerSize;
   static const int kLastPointerFieldOffset = kUniqueIdOffset;
 #else
-  static const int kLastPointerFieldOffset = kFeedbackVectorOffset;
+  static const int kLastPointerFieldOffset = kInnerInfosOffset;
 #endif
 
 #if V8_HOST_ARCH_32_BIT
@@ -7102,6 +7145,7 @@ class SharedFunctionInfo: public HeapObject {
   enum CompilerHints {
     kAllowLazyCompilation,
     kAllowLazyCompilationWithoutContext,
+    kHasSavedOptimizedCode,
     kOptimizationDisabled,
     kStrictModeFunction,
     kUsesArguments,

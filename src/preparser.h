@@ -174,6 +174,11 @@ class ParserBase : public Traits {
     int NextHandlerIndex() { return next_handler_index_++; }
     int handler_count() { return next_handler_index_; }
 
+    int NextInnerFunctionIndex() { return next_inner_function_index_++; }
+    int inner_function_count() { return next_inner_function_index_; }
+
+    int inner_function_index() { return inner_function_index_; }
+
     void AddProperty() { expected_property_count_++; }
     int expected_property_count() { return expected_property_count_; }
 
@@ -203,6 +208,9 @@ class ParserBase : public Traits {
     // Used to assign a per-function index to try and catch handlers.
     int next_handler_index_;
 
+    // Used to assign indices to inner functions.
+    int next_inner_function_index_;
+
     // Properties count estimation.
     int expected_property_count_;
 
@@ -215,6 +223,7 @@ class ParserBase : public Traits {
 
     FunctionState** function_state_stack_;
     FunctionState* outer_function_state_;
+    int inner_function_index_;
     typename Traits::Type::Scope** scope_stack_;
     typename Traits::Type::Scope* outer_scope_;
     typename Traits::Type::Zone* extra_param_;
@@ -814,6 +823,7 @@ class PreParserExpression {
   void set_parenthesized() {}
 
   int position() const { return RelocInfo::kNoPosition; }
+  void set_inner_function_index(int index) {}
   void set_function_token_position(int position) {}
   void set_ast_properties(int* ast_properties) {}
   void set_dont_optimize_reason(BailoutReason dont_optimize_reason) {}
@@ -1084,7 +1094,7 @@ class PreParserFactory {
       PreParserIdentifier name, AstValueFactory* ast_value_factory,
       const PreParserScope& scope, PreParserStatementList body,
       int materialized_literal_count, int expected_property_count,
-      int handler_count, int parameter_count,
+      int handler_count, int inner_function_count, int parameter_count,
       FunctionLiteral::ParameterFlag has_duplicate_parameters,
       FunctionLiteral::FunctionType function_type,
       FunctionLiteral::IsFunctionFlag is_function,
@@ -1367,7 +1377,9 @@ class PreParserTraits {
 
   V8_INLINE void SkipLazyFunctionBody(PreParserIdentifier function_name,
                                       int* materialized_literal_count,
-                                      int* expected_property_count, bool* ok) {
+                                      int* expected_property_count,
+                                      int* inner_function_count,
+                                      bool* ok) {
     UNREACHABLE();
   }
 
@@ -1568,11 +1580,15 @@ ParserBase<Traits>::FunctionState::FunctionState(
     typename Traits::Type::Factory* factory)
     : next_materialized_literal_index_(JSFunction::kLiteralsPrefixSize),
       next_handler_index_(0),
+      next_inner_function_index_(0),
       expected_property_count_(0),
       is_generator_(false),
       generator_object_variable_(NULL),
       function_state_stack_(function_state_stack),
       outer_function_state_(*function_state_stack),
+      inner_function_index_(outer_function_state_
+                            ? outer_function_state_->NextInnerFunctionIndex()
+                            : 0),
       scope_stack_(scope_stack),
       outer_scope_(*scope_stack),
       factory_(factory) {
@@ -2640,6 +2656,8 @@ typename ParserBase<Traits>::ExpressionT ParserBase<
   int materialized_literal_count = -1;
   int expected_property_count = -1;
   int handler_count = 0;
+  int inner_function_count = 0;
+  int inner_function_index = -1;
 
   {
     typename Traits::Type::Factory function_factory(this->ast_value_factory());
@@ -2674,7 +2692,9 @@ typename ParserBase<Traits>::ExpressionT ParserBase<
         body = this->NewStatementList(0, zone());
         this->SkipLazyFunctionBody(this->EmptyIdentifier(),
                                    &materialized_literal_count,
-                                   &expected_property_count, CHECK_OK);
+                                   &expected_property_count,
+                                   &inner_function_count,
+                                   CHECK_OK);
       } else {
         body = this->ParseEagerFunctionBody(
             this->EmptyIdentifier(), RelocInfo::kNoPosition, NULL,
@@ -2684,6 +2704,7 @@ typename ParserBase<Traits>::ExpressionT ParserBase<
             function_state.materialized_literal_count();
         expected_property_count = function_state.expected_property_count();
         handler_count = function_state.handler_count();
+        inner_function_count = function_state.inner_function_count();
       }
     } else {
       // Single-expression body
@@ -2695,8 +2716,10 @@ typename ParserBase<Traits>::ExpressionT ParserBase<
       materialized_literal_count = function_state.materialized_literal_count();
       expected_property_count = function_state.expected_property_count();
       handler_count = function_state.handler_count();
+      inner_function_count = function_state.inner_function_count();
     }
 
+    inner_function_index = function_state.inner_function_index();
     scope->set_start_position(start_pos);
     scope->set_end_position(scanner()->location().end_pos);
 
@@ -2725,11 +2748,13 @@ typename ParserBase<Traits>::ExpressionT ParserBase<
   FunctionLiteralT function_literal = factory()->NewFunctionLiteral(
       this->EmptyIdentifierString(), this->ast_value_factory(), scope, body,
       materialized_literal_count, expected_property_count, handler_count,
-      num_parameters, FunctionLiteral::kNoDuplicateParameters,
+      inner_function_count, num_parameters,
+      FunctionLiteral::kNoDuplicateParameters,
       FunctionLiteral::ANONYMOUS_EXPRESSION, FunctionLiteral::kIsFunction,
       FunctionLiteral::kNotParenthesized, FunctionKind::kArrowFunction,
       start_pos);
 
+  function_literal->set_inner_function_index(inner_function_index);
   function_literal->set_function_token_position(start_pos);
   function_literal->set_ast_properties(&ast_properties);
   function_literal->set_dont_optimize_reason(dont_optimize_reason);

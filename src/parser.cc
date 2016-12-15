@@ -276,6 +276,8 @@ FunctionLiteral* Parser::DefaultConstructor(bool call_super, Scope* scope,
   int materialized_literal_count = -1;
   int expected_property_count = -1;
   int handler_count = 0;
+  int inner_function_count = 0;
+  int inner_function_index = -1;
   int parameter_count = 0;
   AstProperties ast_properties;
   BailoutReason dont_optimize_reason = kNoReason;
@@ -310,7 +312,9 @@ FunctionLiteral* Parser::DefaultConstructor(bool call_super, Scope* scope,
     materialized_literal_count = function_state.materialized_literal_count();
     expected_property_count = function_state.expected_property_count();
     handler_count = function_state.handler_count();
+    inner_function_count = function_state.inner_function_count();
 
+    inner_function_index = function_state.inner_function_index();
     ast_properties = *factory()->visitor()->ast_properties();
     dont_optimize_reason = factory()->visitor()->dont_optimize_reason();
   }
@@ -318,10 +322,12 @@ FunctionLiteral* Parser::DefaultConstructor(bool call_super, Scope* scope,
   FunctionLiteral* function_literal = factory()->NewFunctionLiteral(
       name, ast_value_factory(), function_scope, body,
       materialized_literal_count, expected_property_count, handler_count,
-      parameter_count, FunctionLiteral::kNoDuplicateParameters,
+      inner_function_count, parameter_count,
+      FunctionLiteral::kNoDuplicateParameters,
       FunctionLiteral::ANONYMOUS_EXPRESSION, FunctionLiteral::kIsFunction,
       FunctionLiteral::kNotParenthesized, kind, pos);
 
+  function_literal->set_inner_function_index(inner_function_index);
   function_literal->set_ast_properties(&ast_properties);
   function_literal->set_dont_optimize_reason(dont_optimize_reason);
 
@@ -967,10 +973,12 @@ FunctionLiteral* Parser::DoParseProgram(CompilationInfo* info, Scope** scope,
           ast_value_factory()->empty_string(), ast_value_factory(), scope_,
           body, function_state.materialized_literal_count(),
           function_state.expected_property_count(),
-          function_state.handler_count(), 0,
+          function_state.handler_count(),
+          function_state.inner_function_count(), 0,
           FunctionLiteral::kNoDuplicateParameters,
           FunctionLiteral::ANONYMOUS_EXPRESSION, FunctionLiteral::kGlobalOrEval,
           FunctionLiteral::kNotParenthesized, FunctionKind::kNormalFunction, 0);
+      result->set_inner_function_index(function_state.inner_function_index());
       result->set_ast_properties(factory()->visitor()->ast_properties());
       result->set_dont_optimize_reason(
           factory()->visitor()->dont_optimize_reason());
@@ -1044,6 +1052,9 @@ FunctionLiteral* Parser::ParseLazy(Utf16CharacterStream* source) {
     info()->SetScriptScope(scope);
     if (!info()->closure().is_null()) {
       scope = Scope::DeserializeScopeChain(info()->closure()->context(), scope,
+                                           zone());
+    } else if (!info()->shared_info().is_null()) {
+      scope = Scope::DeserializeScopeChain(info()->shared_info(), scope,
                                            zone());
     }
     original_scope_ = scope;
@@ -3554,6 +3565,8 @@ FunctionLiteral* Parser::ParseFunctionLiteral(
   int materialized_literal_count = -1;
   int expected_property_count = -1;
   int handler_count = 0;
+  int inner_function_count = 0;
+  int inner_function_index = -1;
   FunctionLiteral::ParameterFlag duplicate_parameters =
       FunctionLiteral::kNoDuplicateParameters;
   FunctionLiteral::IsParenthesizedFlag parenthesized = parenthesized_function_
@@ -3703,14 +3716,18 @@ FunctionLiteral* Parser::ParseFunctionLiteral(
 
     if (is_lazily_parsed) {
       SkipLazyFunctionBody(function_name, &materialized_literal_count,
-                           &expected_property_count, CHECK_OK);
+                           &expected_property_count, &inner_function_count,
+                           CHECK_OK);
     } else {
       body = ParseEagerFunctionBody(function_name, pos, fvar, fvar_init_op,
                                     is_generator, CHECK_OK);
       materialized_literal_count = function_state.materialized_literal_count();
       expected_property_count = function_state.expected_property_count();
       handler_count = function_state.handler_count();
+      inner_function_count = function_state.inner_function_count();
     }
+
+    inner_function_index = function_state.inner_function_index();
 
     // Validate strict mode.
     // Concise methods use StrictFormalParameters.
@@ -3739,8 +3756,9 @@ FunctionLiteral* Parser::ParseFunctionLiteral(
   FunctionLiteral* function_literal = factory()->NewFunctionLiteral(
       function_name, ast_value_factory(), scope, body,
       materialized_literal_count, expected_property_count, handler_count,
-      num_parameters, duplicate_parameters, function_type,
-      FunctionLiteral::kIsFunction, parenthesized, kind, pos);
+      inner_function_count, num_parameters, duplicate_parameters,
+      function_type, FunctionLiteral::kIsFunction, parenthesized, kind, pos);
+  function_literal->set_inner_function_index(inner_function_index);
   function_literal->set_function_token_position(function_token_pos);
   function_literal->set_ast_properties(&ast_properties);
   function_literal->set_dont_optimize_reason(dont_optimize_reason);
@@ -3753,6 +3771,7 @@ FunctionLiteral* Parser::ParseFunctionLiteral(
 void Parser::SkipLazyFunctionBody(const AstRawString* function_name,
                                   int* materialized_literal_count,
                                   int* expected_property_count,
+                                  int* inner_function_count,
                                   bool* ok) {
   // Temporary debugging code for tracking down a mystery crash which should
   // never happen. The crash happens on the line where we log the function in
@@ -3760,6 +3779,7 @@ void Parser::SkipLazyFunctionBody(const AstRawString* function_name,
   // done.
   CHECK(materialized_literal_count);
   CHECK(expected_property_count);
+  CHECK(inner_function_count);
   CHECK(debug_saved_compile_options_ == compile_options());
   if (compile_options() == ScriptCompiler::kProduceParserCache) {
     CHECK(log_);
@@ -3785,6 +3805,7 @@ void Parser::SkipLazyFunctionBody(const AstRawString* function_name,
     total_preparse_skipped_ += scope_->end_position() - function_block_pos;
     *materialized_literal_count = entry.literal_count();
     *expected_property_count = entry.property_count();
+    UNIMPLEMENTED(); // *inner_function_count = ?
     scope_->SetStrictMode(entry.strict_mode());
   } else {
     // With no cached data, we partially parse the function, without building an
@@ -3813,6 +3834,7 @@ void Parser::SkipLazyFunctionBody(const AstRawString* function_name,
     total_preparse_skipped_ += scope_->end_position() - function_block_pos;
     *materialized_literal_count = logger.literals();
     *expected_property_count = logger.properties();
+    *inner_function_count = logger.inner_functions();
     scope_->SetStrictMode(logger.strict_mode());
     if (compile_options() == ScriptCompiler::kProduceParserCache) {
       DCHECK(log_);
@@ -3821,6 +3843,7 @@ void Parser::SkipLazyFunctionBody(const AstRawString* function_name,
       log_->LogFunction(function_block_pos, body_end,
                         *materialized_literal_count,
                         *expected_property_count,
+                        *inner_function_count,
                         scope_->strict_mode());
     }
   }

@@ -426,6 +426,7 @@ class Logger {
   V(RecompileSynchronous, true) \
   V(RecompileConcurrent, true)  \
   V(CompileFullCode, true)      \
+  V(Saveload, true)             \
   V(Execute, true)              \
   V(External, true)             \
   V(IcMiss, false)

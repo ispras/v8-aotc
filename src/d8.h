@@ -260,6 +260,7 @@ class Shell : public i::AllStatic {
   static void ReportException(Isolate* isolate, TryCatch* try_catch);
   static Handle<String> ReadFile(Isolate* isolate, const char* name);
   static Local<Context> CreateEvaluationContext(Isolate* isolate);
+  static void RegisterShellExternalFunctions(Isolate* isolate);
   static int RunMain(Isolate* isolate, int argc, char* argv[]);
   static int Main(int argc, char* argv[]);
   static void Exit(int exit_code);

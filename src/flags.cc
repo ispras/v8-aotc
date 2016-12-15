@@ -528,6 +528,8 @@ void FlagList::PrintHelp() {
      << "  shell [options]\n"
      << "  shell [options] --shell [file1 file2 ... filek]\n"
      << "    run an interactive JavaScript shell\n"
+     << "  d8 [options] [--save-code | --load-code] codefile file\n"
+     << "    specify codefile to save to or load generated code from\n"
      << "  d8 [options] file1 file2 ... filek\n"
      << "  d8 [options]\n"
      << "  d8 [options] --shell [file1 file2 ... filek]\n"

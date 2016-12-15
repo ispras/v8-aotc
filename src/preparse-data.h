@@ -27,6 +27,7 @@ class ParserRecorder {
                            int end,
                            int literals,
                            int properties,
+                           int inner_functions,
                            StrictMode strict_mode) = 0;
 
   // Logs an error message and marks the log as containing an error.
@@ -54,12 +55,14 @@ class SingletonLogger : public ParserRecorder {
                            int end,
                            int literals,
                            int properties,
+                           int inner_functions,
                            StrictMode strict_mode) {
     DCHECK(!has_error_);
     start_ = start;
     end_ = end;
     literals_ = literals;
     properties_ = properties;
+    inner_functions_ = inner_functions;
     strict_mode_ = strict_mode;
   }
 
@@ -92,6 +95,10 @@ class SingletonLogger : public ParserRecorder {
     DCHECK(!has_error_);
     return properties_;
   }
+  int inner_functions() const {
+    DCHECK(!has_error_);
+    return inner_functions_;
+  }
   StrictMode strict_mode() const {
     DCHECK(!has_error_);
     return strict_mode_;
@@ -113,6 +120,7 @@ class SingletonLogger : public ParserRecorder {
   // For function entries.
   int literals_;
   int properties_;
+  int inner_functions_;
   StrictMode strict_mode_;
   // For error messages.
   const char* message_;
@@ -135,11 +143,13 @@ class CompleteParserRecorder : public ParserRecorder {
                            int end,
                            int literals,
                            int properties,
+                           int inner_functions,
                            StrictMode strict_mode) {
     function_store_.Add(start);
     function_store_.Add(end);
     function_store_.Add(literals);
     function_store_.Add(properties);
+    function_store_.Add(inner_functions);
     function_store_.Add(strict_mode);
   }
 

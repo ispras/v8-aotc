@@ -263,6 +263,53 @@ Scope* Scope::DeserializeScopeChain(Context* context, Scope* script_scope,
 }
 
 
+Scope* Scope::DeserializeScopeChain(Handle<SharedFunctionInfo> shared_info,
+                                    Scope* script_scope, Zone* zone) {
+  // Reconstruct the outer scope chain from a shared_info chain.
+  //
+  // TODO: Implement other scope types:
+  //   - EVAL_SCOPE
+  //   - MODULE_SCOPE
+  //   - SCRIPT_SCOPE
+  //   - CATCH_SCOPE
+  //   - BLOCK_SCOPE
+  //   - WITH_SCOPE
+  //   - ARROW_SCOPE
+
+  Isolate* isolate = shared_info->GetIsolate();
+  Scope* current_scope = NULL;
+  Scope* innermost_scope = NULL;
+
+  while (shared_info = handle(shared_info->outer_info()),
+         !shared_info->is_toplevel()) {
+    DCHECK(shared_info->is_function());
+
+    Handle<ScopeInfo> scope_info = handle(shared_info->scope_info());
+    if (*scope_info == ScopeInfo::Empty(isolate)) {
+      // Parse this SharedFunctionInfo to obtain its scope info.
+      CompilationInfo info(shared_info, zone);
+      CHECK(Compiler::ParseAndAnalyze(&info));
+      scope_info = ScopeInfo::Create(info.scope(), zone);
+      shared_info->set_scope_info(*scope_info);
+    }
+
+    current_scope = new(zone) Scope(current_scope,
+                                    FUNCTION_SCOPE,
+                                    scope_info,
+                                    script_scope->ast_value_factory_,
+                                    zone);
+    if (scope_info->IsAsmFunction()) current_scope->asm_function_ = true;
+    if (scope_info->IsAsmModule()) current_scope->asm_module_ = true;
+
+    if (innermost_scope == NULL) innermost_scope = current_scope;
+  }
+
+  script_scope->AddInnerScope(current_scope);
+  script_scope->PropagateScopeInfo(false);
+  return (innermost_scope == NULL) ? script_scope : innermost_scope;
+}
+
+
 bool Scope::Analyze(CompilationInfo* info) {
   DCHECK(info->function() != NULL);
   Scope* scope = info->function()->scope();

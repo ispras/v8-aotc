@@ -70,31 +70,33 @@ bool LCodeGenBase::GenerateBody() {
     if (instr->IsLabel()) {
       emit_instructions = !LLabel::cast(instr)->HasReplacement() &&
           (!FLAG_unreachable_code_elimination ||
-           instr->hydrogen_value()->block()->IsReachable());
+           LLabel::cast(instr)->block()->IsReachable());
       if (FLAG_code_comments && !emit_instructions) {
         Comment(
             ";;; <@%d,#%d> -------------------- B%d (unreachable/replaced) "
             "--------------------",
             current_instruction_,
-            instr->hydrogen_value()->id(),
-            instr->hydrogen_value()->block()->block_id());
+            instr->hydrogen_shim()->id(),
+            instr->hydrogen_shim()->block_id());
       }
     }
     if (!emit_instructions) continue;
 
-    if (FLAG_code_comments && instr->HasInterestingComment(codegen)) {
+    if (FLAG_lithium_codegen_comments ||
+        (FLAG_code_comments && instr->HasInterestingComment(codegen))) {
       Comment(";;; <@%d,#%d> %s",
               current_instruction_,
-              instr->hydrogen_value()->id(),
+              instr->hydrogen_shim()->id(),
               instr->Mnemonic());
     }
 
     GenerateBodyInstructionPre(instr);
 
-    HValue* value = instr->hydrogen_value();
-    if (!value->position().IsUnknown()) {
-      RecordAndWritePosition(
-        chunk()->graph()->SourcePositionToScriptPosition(value->position()));
+    if (!instr->hydrogen_shim()->position().IsUnknown()) {
+      RecordAndWritePosition(chunk()->graph()->
+                             SourcePositionToScriptPosition(instr->
+                                                            hydrogen_shim()->
+                                                            position()));
     }
 
     instr->CompileToNative(codegen);
@@ -113,6 +115,7 @@ void LCodeGenBase::CheckEnvironmentUsage() {
   for (int i = 0; i < instructions_->length(); i++) {
     LInstruction* instr = instructions_->at(i);
     HValue* hval = instr->hydrogen_value();
+    if (!hval) continue; // Hack for save-load implementation.
     if (instr->IsLabel()) dead_block = LLabel::cast(instr)->HasReplacement();
     if (dead_block || !hval->block()->IsReachable()) continue;
 

@@ -11,6 +11,7 @@
 #include "src/hydrogen-osr.h"
 #include "src/lithium-inl.h"
 #include "src/x64/lithium-codegen-x64.h"
+#include "src/x64/lithium-saveload-x64.h"
 
 namespace v8 {
 namespace internal {
@@ -21,6 +22,39 @@ namespace internal {
   }
 LITHIUM_CONCRETE_INSTRUCTION_LIST(DEFINE_COMPILE)
 #undef DEFINE_COMPILE
+
+
+#define DEFINE_SAVELOAD(type)                                           \
+  void L##type::SaveTo(LChunkSaver* saver) const {                      \
+    saver->SaveL##type(this);                                           \
+  }                                                                     \
+  void L##type::SaveHydrogenShimTo(LChunkSaver* saver) const {          \
+    saver->SaveHydrogenShim(this);                                      \
+  }
+LITHIUM_CONCRETE_INSTRUCTION_LIST(DEFINE_SAVELOAD)
+#undef DEFINE_SAVELOAD
+
+
+// Cannot simply DEFINE_SAVELOAD here because of template params.
+template<int R>
+void LTemplateResultInstruction<R>::SaveTemplateResultInstructionTo(LChunkSaver* saver) const {
+  saver->SaveTemplateResultInstruction(this);
+}
+
+template<int R>
+void LTemplateResultInstruction<R>::LoadTemplateResultInstruction(LChunkLoader* loader) {
+  loader->LoadTemplateResultInstruction(this);
+}
+
+template<int R, int I, int T>
+void LTemplateInstruction<R, I, T>::SaveTemplateInstructionTo(LChunkSaver* saver) const {
+  saver->SaveTemplateInstruction(this);
+}
+
+template<int I, int T>
+void LControlInstruction<I, T>::SaveControlInstructionTo(LChunkSaver* saver) const {
+  // Empty.
+}
 
 
 #ifdef DEBUG
@@ -156,7 +190,7 @@ bool LGoto::HasInterestingComment(LCodeGen* gen) const {
 template<int R>
 bool LTemplateResultInstruction<R>::MustSignExtendResult(
     LPlatformChunk* chunk) const {
-  HValue* hvalue = this->hydrogen_value();
+  HValueShim* hvalue = this->hydrogen_shim();
   return hvalue != NULL &&
       hvalue->representation().IsInteger32() &&
       chunk->GetDehoistedKeyIds()->Contains(hvalue->id());
@@ -286,13 +320,13 @@ void LCallWithDescriptor::PrintDataTo(StringStream* stream) {
 
 void LLoadContextSlot::PrintDataTo(StringStream* stream) {
   context()->PrintTo(stream);
-  stream->Add("[%d]", slot_index());
+  stream->Add("[%d]", hydrogen_shim()->slot_index());
 }
 
 
 void LStoreContextSlot::PrintDataTo(StringStream* stream) {
   context()->PrintTo(stream);
-  stream->Add("[%d] <- ", slot_index());
+  stream->Add("[%d] <- ", hydrogen_shim()->slot_index());
   value()->PrintTo(stream);
 }
 
@@ -315,7 +349,7 @@ void LCallNewArray::PrintDataTo(StringStream* stream) {
   stream->Add("= ");
   constructor()->PrintTo(stream);
   stream->Add(" #%d / ", arity());
-  ElementsKind kind = hydrogen()->elements_kind();
+  ElementsKind kind = hydrogen_shim()->elements_kind();
   stream->Add(" (%s) ", ElementsKindToString(kind));
 }
 
@@ -363,7 +397,7 @@ LOperand* LPlatformChunk::GetNextSpillSlot(RegisterKind kind) {
 void LStoreNamedField::PrintDataTo(StringStream* stream) {
   object()->PrintTo(stream);
   std::ostringstream os;
-  os << hydrogen()->access() << " <- ";
+  os << hydrogen_shim()->access() << " <- ";
   stream->Add(os.str().c_str());
   value()->PrintTo(stream);
 }
@@ -382,7 +416,7 @@ void LLoadKeyed::PrintDataTo(StringStream* stream) {
   elements()->PrintTo(stream);
   stream->Add("[");
   key()->PrintTo(stream);
-  if (hydrogen()->IsDehoisted()) {
+  if (hydrogen_shim()->IsDehoisted()) {
     stream->Add(" + %d]", base_offset());
   } else {
     stream->Add("]");
@@ -394,7 +428,7 @@ void LStoreKeyed::PrintDataTo(StringStream* stream) {
   elements()->PrintTo(stream);
   stream->Add("[");
   key()->PrintTo(stream);
-  if (hydrogen()->IsDehoisted()) {
+  if (hydrogen_shim()->IsDehoisted()) {
     stream->Add(" + %d] <-", base_offset());
   } else {
     stream->Add("] <- ");
@@ -402,7 +436,7 @@ void LStoreKeyed::PrintDataTo(StringStream* stream) {
 
   if (value() == NULL) {
     DCHECK(hydrogen()->IsConstantHoleStore() &&
-           hydrogen()->value()->representation().IsDouble());
+           hydrogen_shim()->value()->representation().IsDouble());
     stream->Add("<the hole(nan)>");
   } else {
     value()->PrintTo(stream);
@@ -852,7 +886,7 @@ void LChunkBuilder::VisitInstruction(HInstruction* current) {
       if (current->OperandAt(i)->IsControlInstruction()) continue;
       LInstruction* dummy =
           new(zone()) LDummyUse(UseAny(current->OperandAt(i)));
-      dummy->set_hydrogen_value(current);
+      dummy->set_hydrogen_value(current, zone());
       chunk_->AddInstruction(dummy, current_block_);
     }
   } else {
@@ -881,7 +915,7 @@ void LChunkBuilder::AddInstruction(LInstruction* instr,
                                    HInstruction* hydrogen_val) {
   // Associate the hydrogen instruction first, since we may need it for
   // the ClobbersRegisters() or ClobbersDoubleRegisters() calls below.
-  instr->set_hydrogen_value(hydrogen_val);
+  instr->set_hydrogen_value(hydrogen_val, zone());
 
 #if DEBUG
   // Make sure that the lithium instruction has either no fixed register
@@ -931,7 +965,7 @@ void LChunkBuilder::AddInstruction(LInstruction* instr,
       hydrogen_value_for_lazy_bailout = sim;
     }
     LInstruction* bailout = AssignEnvironment(new(zone()) LLazyBailout());
-    bailout->set_hydrogen_value(hydrogen_value_for_lazy_bailout);
+    bailout->set_hydrogen_value(hydrogen_value_for_lazy_bailout, zone());
     chunk_->AddInstruction(bailout, current_block_);
     if (instruction_needing_environment != NULL) {
       // Store the lazy deopt environment with the instruction if needed.

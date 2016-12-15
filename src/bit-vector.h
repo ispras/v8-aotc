@@ -15,6 +15,10 @@
 namespace v8 {
 namespace internal {
 
+class LChunkSaverBase;
+class LChunkLoaderBase;
+
+
 class BitVector : public ZoneObject {
  public:
   // Iterator for the elements of this BitVector.
@@ -65,6 +69,11 @@ class BitVector : public ZoneObject {
   static const int kDataBits = kPointerSize * 8;
   static const int kDataBitShift = kPointerSize == 8 ? 6 : 5;
   static const uintptr_t kOne = 1;  // This saves some static_casts.
+
+  BitVector()
+      : length_(0),
+        data_length_(0),
+        data_(nullptr) {}
 
   BitVector(int length, Zone* zone)
       : length_(length),
@@ -181,11 +190,14 @@ class BitVector : public ZoneObject {
 #endif
 
  private:
-  const int length_;
-  const int data_length_;
-  uintptr_t* const data_;
+  int length_;
+  int data_length_;
+  uintptr_t* data_;
 
   DISALLOW_COPY_AND_ASSIGN(BitVector);
+
+  friend class LChunkSaverBase;
+  friend class LChunkLoaderBase;
 };
 
 

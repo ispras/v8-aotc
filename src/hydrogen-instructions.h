@@ -36,6 +36,11 @@ class HStoreNamedField;
 class HValue;
 class LInstruction;
 class LChunkBuilder;
+class LChunkLoader;
+class HStackCheckShim;
+class HLoadNamedFieldShim;
+class HStoreNamedFieldShim;
+class HAllocateShim;
 
 #define HYDROGEN_ABSTRACT_INSTRUCTION_LIST(V) \
   V(ArithmeticBinaryOperation)                \
@@ -459,6 +464,7 @@ class HSourcePosition {
 
   friend class HPositionInfo;
   friend class LCodeGenBase;
+  friend class LChunkLoader;
 
   // If FLAG_hydrogen_track_positions is set contains bitfields InliningIdField
   // and PositionField.
@@ -1146,12 +1152,16 @@ class HInstruction : public HValue {
  public:
   HInstruction* next() const { return next_; }
   HInstruction* previous() const { return previous_; }
+  void set_next(HInstruction* next) { next_ = next; }
+  void set_previous(HInstruction* previous) { previous_ = previous; }
 
   virtual std::ostream& PrintTo(std::ostream& os) const OVERRIDE;  // NOLINT
   virtual std::ostream& PrintDataTo(std::ostream& os) const;       // NOLINT
 
   bool IsLinked() const { return block() != NULL; }
   void Unlink();
+
+  void ClearBlock() { clear_block(); }
 
   void InsertBefore(HInstruction* next);
 
@@ -1178,6 +1188,9 @@ class HInstruction : public HValue {
     DCHECK(!has_position());
     DCHECK(!position.IsUnknown());
     position_.set_position(position);
+  }
+  void clear_position() {
+    position_.set_position(HSourcePosition::Unknown());
   }
 
   virtual HSourcePosition operand_position(int index) const OVERRIDE {
@@ -2004,6 +2017,8 @@ class HStackCheck FINAL : public HTemplateInstruction<1> {
   }
 
   Type type_;
+
+  friend class HStackCheckShim;
 };
 
 
@@ -2877,6 +2892,8 @@ class HCheckMaps FINAL : public HTemplateInstruction<2> {
 
   const UniqueSet<Map>* maps_;
   uint32_t bit_field_;
+
+  friend class HCheckMapsShim;
 };
 
 
@@ -3577,6 +3594,49 @@ class HConstant FINAL : public HTemplateInstruction<0> {
     return object_.handle();
   }
 
+  Handle<String> Name() const { return name_; }
+  void SetName(Handle<String> name) { name_ = name; }
+
+  bool IsBuiltin() const { return is_builtin_; }
+  void IsBuiltin(bool flag) { is_builtin_ = flag; }
+
+  Handle<JSFunction> ContextOwner() const { return context_owner_; }
+  void SetContextOwner(Handle<JSFunction> function) {
+    DCHECK(object_.handle()->IsContext());
+    context_owner_ = function;
+  }
+
+  enum CodeRelocationType {
+    kUninitialized,
+    kArgumentsAdaptor,
+    kApiFunctionStub
+  };
+
+  struct CodeRelocationData {
+    CodeRelocationType type;
+    bool is_store, call_data_undefined;
+    int argc;
+  };
+
+  const CodeRelocationData* CodeRelocation() const {
+    DCHECK(code_relocation_data_.type != kUninitialized);
+    return &code_relocation_data_;
+  }
+
+  void SetArgumentsAdaptorCodeRelocation() {
+    DCHECK(code_relocation_data_.type == kUninitialized);
+    code_relocation_data_.type = kArgumentsAdaptor;
+  }
+
+  void SetApiFunctionStubCodeRelocation(bool is_store,
+                                        bool call_data_undefined, int argc) {
+    DCHECK(code_relocation_data_.type == kUninitialized);
+    code_relocation_data_.type = kApiFunctionStub;
+    code_relocation_data_.is_store = is_store;
+    code_relocation_data_.call_data_undefined = call_data_undefined;
+    code_relocation_data_.argc = argc;
+  }
+
   bool IsSpecialDouble() const {
     return HasDoubleValue() &&
            (bit_cast<int64_t>(double_value_) == bit_cast<int64_t>(-0.0) ||
@@ -3750,6 +3810,7 @@ class HConstant FINAL : public HTemplateInstruction<0> {
 
  private:
   friend class HGraph;
+  friend class HConstantShim;
   explicit HConstant(Handle<Object> handle,
                      Representation r = Representation::None());
   HConstant(int32_t value,
@@ -3800,6 +3861,14 @@ class HConstant FINAL : public HTemplateInstruction<0> {
   // constant is non-numeric, object_ always points to a valid
   // constant HeapObject.
   Unique<Object> object_;
+
+  // Variable name and source for constants obtained via name lookup.
+  Handle<String> name_;
+  bool is_builtin_;
+
+  // Relocation data.
+  Handle<JSFunction> context_owner_;
+  CodeRelocationData code_relocation_data_;
 
   // If object_ is a heap object, this points to the stable map of the object.
   Unique<Map> object_map_;
@@ -5475,10 +5544,11 @@ class HUnknownOSRValue FINAL : public HTemplateInstruction<0> {
 
 class HLoadGlobalCell FINAL : public HTemplateInstruction<0> {
  public:
-  DECLARE_INSTRUCTION_FACTORY_P2(HLoadGlobalCell, Handle<Cell>,
-                                 PropertyDetails);
+  DECLARE_INSTRUCTION_FACTORY_P3(HLoadGlobalCell, Handle<PropertyCell>,
+                                 Handle<String>, PropertyDetails);
 
-  Unique<Cell> cell() const { return cell_; }
+  Unique<PropertyCell> cell() const { return cell_; }
+  Handle<String> name() const { return name_; }
   bool RequiresHoleCheck() const;
 
   virtual std::ostream& PrintDataTo(std::ostream& os) const OVERRIDE;  // NOLINT
@@ -5488,7 +5558,7 @@ class HLoadGlobalCell FINAL : public HTemplateInstruction<0> {
   }
 
   virtual void FinalizeUniqueness() OVERRIDE {
-    cell_ = Unique<Cell>(cell_.handle());
+    cell_ = Unique<PropertyCell>(cell_.handle());
   }
 
   virtual Representation RequiredInputRepresentation(int index) OVERRIDE {
@@ -5503,8 +5573,11 @@ class HLoadGlobalCell FINAL : public HTemplateInstruction<0> {
   }
 
  private:
-  HLoadGlobalCell(Handle<Cell> cell, PropertyDetails details)
-    : cell_(Unique<Cell>::CreateUninitialized(cell)), details_(details) {
+  HLoadGlobalCell(Handle<PropertyCell> cell, Handle<String> name,
+                  PropertyDetails details)
+      : cell_(Unique<PropertyCell>::CreateUninitialized(cell)),
+        name_(name),
+        details_(details) {
     set_representation(Representation::Tagged());
     SetFlag(kUseGVN);
     SetDependsOnFlag(kGlobalVars);
@@ -5512,7 +5585,8 @@ class HLoadGlobalCell FINAL : public HTemplateInstruction<0> {
 
   virtual bool IsDeletable() const OVERRIDE { return !RequiresHoleCheck(); }
 
-  Unique<Cell> cell_;
+  Unique<PropertyCell> cell_;
+  Handle<String> name_;
   PropertyDetails details_;
 };
 
@@ -5752,6 +5826,8 @@ class HAllocate FINAL : public HTemplateInstruction<2> {
   HAllocate* dominating_allocate_;
   HStoreNamedField* filler_free_space_size_;
   HConstant* size_upper_bound_;
+
+  friend class HAllocateShim;
 };
 
 
@@ -5880,10 +5956,12 @@ inline PointersToHereCheck PointersToHereCheckForObject(HValue* object,
 
 class HStoreGlobalCell FINAL : public HUnaryOperation {
  public:
-  DECLARE_INSTRUCTION_FACTORY_P3(HStoreGlobalCell, HValue*,
-                                 Handle<PropertyCell>, PropertyDetails);
+  DECLARE_INSTRUCTION_FACTORY_P4(HStoreGlobalCell, HValue*,
+                                 Handle<PropertyCell>, Handle<String>,
+                                 PropertyDetails);
 
   Unique<PropertyCell> cell() const { return cell_; }
+  Handle<String> name() const { return name_; }
   bool RequiresHoleCheck() { return details_.IsConfigurable(); }
   bool NeedsWriteBarrier() {
     return StoringValueNeedsWriteBarrier(value());
@@ -5903,14 +5981,17 @@ class HStoreGlobalCell FINAL : public HUnaryOperation {
  private:
   HStoreGlobalCell(HValue* value,
                    Handle<PropertyCell> cell,
+                   Handle<String> name,
                    PropertyDetails details)
       : HUnaryOperation(value),
         cell_(Unique<PropertyCell>::CreateUninitialized(cell)),
+        name_(name),
         details_(details) {
     SetChangesFlag(kGlobalVars);
   }
 
   Unique<PropertyCell> cell_;
+  Handle<String> name_;
   PropertyDetails details_;
 };
 
@@ -6400,6 +6481,9 @@ class HObjectAccess FINAL {
   inline Portion portion() const {
     return PortionField::decode(value_);
   }
+
+  friend class HLoadNamedFieldShim;
+  friend class HStoreNamedFieldShim;
 };
 
 
@@ -7015,6 +7099,8 @@ class HStoreNamedField FINAL : public HTemplateInstruction<3> {
   HObjectAccess access_;
   HValue* dominator_;
   uint32_t bit_field_;
+
+  friend class HStoreNamedFieldShim;
 };
 
 
@@ -7983,7 +8069,7 @@ class HAllocateBlockContext: public HTemplateInstruction<2> {
 
 
 
-#undef DECLARE_INSTRUCTION
+#undef DECLARE_ABSTRACT_INSTRUCTION
 #undef DECLARE_CONCRETE_INSTRUCTION
 
 } }  // namespace v8::internal

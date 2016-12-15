@@ -9,6 +9,7 @@
 #include "src/ast-numbering.h"
 #include "src/bootstrapper.h"
 #include "src/codegen.h"
+#include "src/code-block-database.h"
 #include "src/compilation-cache.h"
 #include "src/compiler/pipeline.h"
 #include "src/cpu-profiler.h"
@@ -151,6 +152,7 @@ void CompilationInfo::Initialize(Isolate* isolate,
   zone_ = zone;
   deferred_handles_ = NULL;
   code_stub_ = NULL;
+  chunk_ = NULL;
   prologue_offset_ = Code::kPrologueOffsetNotSet;
   opt_count_ = shared_info().is_null() ? 0 : shared_info()->opt_count();
   no_frame_ranges_ = isolate->cpu_profiler()->is_profiling()
@@ -469,12 +471,60 @@ OptimizedCompileJob::Status OptimizedCompileJob::OptimizeGraph() {
 
   if (graph_->Optimize(&bailout_reason)) {
     chunk_ = LChunk::NewChunk(graph_);
-    if (chunk_ != NULL) return SetLastStatus(SUCCEEDED);
+    if (chunk_ != NULL) {
+      info()->SetChunk(chunk_);
+      return SetLastStatus(SUCCEEDED);
+    }
   } else if (bailout_reason != kNoReason) {
     graph_builder_->Bailout(bailout_reason);
   }
 
   return SetLastStatus(BAILED_OUT);
+}
+
+
+OptimizedCompileJob::Status OptimizedCompileJob::SaveChunk(LSavedChunk* saved_chunk) {
+  DisallowHeapAllocation no_allocation;
+
+  const char* reason = nullptr;
+
+  if (Script::cast(info()->shared_info()->script())->compilation_type() !=
+      Script::COMPILATION_TYPE_HOST) {
+    reason = "eval";
+  } else if (!saved_chunk->Save(chunk_)) {
+    reason = saved_chunk->Reason();
+  } else {
+    return SUCCEEDED;
+  }
+
+  DCHECK(reason);
+
+  if (FLAG_trace_saveload) {
+    PrintF("[optimized code for %d not saved, reason: %s]\n",
+           info()->shared_info()->start_position(), reason);
+  }
+
+  // Don't SetLastStatus: failed save should not abort compilation.
+  return FAILED;
+}
+
+
+OptimizedCompileJob::Status OptimizedCompileJob::LoadChunk(const LSavedChunk* saved_chunk) {
+  DCHECK(chunk_ == NULL);
+  chunk_ = saved_chunk->Load(info());
+
+  if (chunk_) {
+    graph_ = chunk_->graph();
+    return SetLastStatus(SUCCEEDED);
+  }
+
+  if (FLAG_trace_saveload) {
+    DCHECK(saved_chunk->Reason());
+    PrintF("[optimized code for %d failed to load, reason: %s]\n",
+           info()->shared_info()->start_position(), saved_chunk->Reason());
+  }
+
+  return SetLastStatus(FAILED);
 }
 
 
@@ -762,14 +812,10 @@ bool Compiler::ParseAndAnalyze(CompilationInfo* info) {
 }
 
 
-static bool GetOptimizedCodeNow(CompilationInfo* info) {
-  if (!Compiler::ParseAndAnalyze(info)) return false;
+static bool GenerateOptimizedCode(OptimizedCompileJob job) {
+  CompilationInfo* info = job.info();
 
-  TimerEventScope<TimerEventRecompileSynchronous> timer(info->isolate());
-
-  OptimizedCompileJob job(info);
-  if (job.CreateGraph() != OptimizedCompileJob::SUCCEEDED ||
-      job.OptimizeGraph() != OptimizedCompileJob::SUCCEEDED ||
+  if (job.last_status() != OptimizedCompileJob::SUCCEEDED ||
       job.GenerateCode() != OptimizedCompileJob::SUCCEEDED) {
     if (FLAG_trace_opt) {
       PrintF("[aborted optimizing ");
@@ -789,6 +835,87 @@ static bool GetOptimizedCodeNow(CompilationInfo* info) {
     info->closure()->ShortPrint();
     PrintF("]\n");
   }
+  return true;
+}
+
+
+bool Compiler::SaveOptimizedCode(CompilationInfo* info) {
+  TimerEventScope<TimerEventSaveload> timer(info->isolate());
+  OptimizedCompileJob job(info);
+
+  Script* script = Script::cast(info->shared_info()->script());
+  if (script->type()->value() == Script::TYPE_NORMAL) {
+    LSavedChunk chunk;
+    if (job.SaveChunk(&chunk) == OptimizedCompileJob::SUCCEEDED) {
+      Vector<const char> code = chunk.GetCode();
+      code_block_database->SetCode(info->function()->start_position(), code);
+
+      if (FLAG_trace_saveload) {
+        PrintF("[optimized code for %d saved, size=%d]\n",
+               info->shared_info()->start_position(), code.length());
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
+bool Compiler::LoadOptimizedCode(CompilationInfo* info) {
+  TimerEventScope<TimerEventSaveload> timer(info->isolate());
+  OptimizedCompileJob job(info);
+
+  int start_position = info->shared_info()->start_position();
+  Vector<const char> code = code_block_database->GetCode(start_position);
+  LSavedChunk chunk(code);
+
+  bool status = job.LoadChunk(&chunk) == OptimizedCompileJob::SUCCEEDED
+    && GenerateOptimizedCode(job);
+
+  if (status && FLAG_trace_saveload) {
+    PrintF("[optimized code for %d loaded]\n",
+           info->shared_info()->start_position());
+  }
+  return status;
+}
+
+
+bool Compiler::MakeOptimizedCode(CompilationInfo* info) {
+  TimerEventScope<TimerEventRecompileSynchronous> timer(info->isolate());
+  OptimizedCompileJob job(info);
+
+  return job.CreateGraph() == OptimizedCompileJob::SUCCEEDED &&
+    job.OptimizeGraph() == OptimizedCompileJob::SUCCEEDED &&
+    GenerateOptimizedCode(job);
+}
+
+
+bool Compiler::GetOptimizedCodeNow(CompilationInfo* info) {
+  if (!ParseAndAnalyze(info)) return false;
+
+  bool allow_saveload = (FLAG_save_code || FLAG_load_code) &&
+     info->closure()->PassesFilter(FLAG_saveload_filter);
+
+  if (allow_saveload && info->shared_info()->has_saved_optimized_code()) {
+    if (!LoadOptimizedCode(info)) {
+      info->shared_info()->set_has_saved_optimized_code(false);
+
+      // Since we force early code loading, it is better to fail even if
+      // we could potentially make optimized code at this point
+      // (in general we can't).
+      return false;
+    }
+
+    return true;
+  }
+
+  if (!MakeOptimizedCode(info)) return false;
+
+  if (allow_saveload && FLAG_save_code) {
+    SaveOptimizedCode(info);
+  }
+
   return true;
 }
 
@@ -874,23 +1001,35 @@ MaybeHandle<Code> Compiler::GetLazyCode(Handle<JSFunction> function) {
     return Handle<Code>(function->shared()->code());
   }
 
-  CompilationInfoWithZone info(function);
-  Handle<Code> result;
-  ASSIGN_RETURN_ON_EXCEPTION(isolate, result, GetUnoptimizedCodeCommon(&info),
-                             Code);
+  bool has_saved_optimized_code =
+    function->shared()->has_saved_optimized_code();
 
-  if (FLAG_always_opt && isolate->use_crankshaft() &&
+  CompilationInfoWithZone info(function);
+
+  if ((has_saved_optimized_code || FLAG_always_opt) &&
+      isolate->use_crankshaft() &&
       !info.shared_info()->optimization_disabled() &&
       !isolate->DebuggerHasBreakPoints()) {
     Handle<Code> opt_code;
     if (Compiler::GetOptimizedCode(
-            function, result,
+            function, Handle<Code>::null(),
             Compiler::NOT_CONCURRENT).ToHandle(&opt_code)) {
-      result = opt_code;
+      return opt_code;
+    } else if (!has_saved_optimized_code) {
+      return MaybeHandle<Code>();
+    }
+
+    if (FLAG_trace_saveload) {
+      PrintF("[failed to load and compile code for %d from \"%s\"]\n",
+             function->shared()->start_position(),
+             code_block_database->Source());
     }
   }
 
-  return result;
+  Handle<Code> unopt_code;
+  ASSIGN_RETURN_ON_EXCEPTION(isolate, unopt_code,
+                             GetUnoptimizedCodeCommon(&info), Code);
+  return unopt_code;
 }
 
 
@@ -1067,17 +1206,28 @@ static Handle<SharedFunctionInfo> CompileToplevel(CompilationInfo* info) {
           : info->isolate()->counters()->compile();
     HistogramTimerScope timer(rate);
 
-    // Compile the code.
-    if (!CompileUnoptimizedCode(info)) {
+    if (!Compiler::Analyze(info)) {
+      if (!isolate->has_pending_exception()) isolate->StackOverflow();
       return Handle<SharedFunctionInfo>::null();
     }
 
     // Allocate function.
-    DCHECK(!info->code().is_null());
     result = isolate->factory()->NewSharedFunctionInfo(
-        lit->name(), lit->materialized_literal_count(), lit->kind(),
-        info->code(), ScopeInfo::Create(info->scope(), info->zone()),
+        lit->name(), lit->materialized_literal_count(),
+        lit->inner_function_count(), lit->kind(), MaybeHandle<Code>(),
+        ScopeInfo::Create(info->scope(), info->zone()),
         info->feedback_vector());
+
+    info->SetSharedFunctionInfo(result);
+
+    // Compile the code.
+    if (!FullCodeGenerator::MakeCode(info)) {
+      if (!isolate->has_pending_exception()) isolate->StackOverflow();
+      return Handle<SharedFunctionInfo>::null();
+    }
+
+    DCHECK(!info->code().is_null());
+    result->set_code(*info->code());
 
     DCHECK_EQ(RelocInfo::kNoPosition, lit->function_token_position());
     SetFunctionInfo(result, lit, true, script);
@@ -1309,27 +1459,48 @@ Handle<SharedFunctionInfo> Compiler::BuildFunctionInfo(
     DCHECK(allow_lazy);
   }
 
+  bool has_saved_optimized_code =
+    script->type()->value() == Script::TYPE_NORMAL &&
+    FLAG_load_code &&
+    code_block_database->HasCode(literal->start_position());
+
+  Handle<ScopeInfo> scope_info(ScopeInfo::Empty(isolate));
+
+  // Create a shared function info object.
+  Handle<SharedFunctionInfo> result = factory->NewSharedFunctionInfo(
+      literal->name(), literal->materialized_literal_count(),
+      literal->inner_function_count(), literal->kind(),
+      MaybeHandle<Code>(), scope_info, info.feedback_vector());
+
+  // Make this shared function info available to inner shared
+  // function infos so that they could register in it.
+  info.SetSharedFunctionInfo(result);
+
   // Generate code
-  Handle<ScopeInfo> scope_info;
-  if (FLAG_lazy && allow_lazy && !literal->is_parenthesized()) {
+  if ((FLAG_lazy && allow_lazy && !literal->is_parenthesized()) ||
+      has_saved_optimized_code) {
     Handle<Code> code = isolate->builtins()->CompileLazy();
     info.SetCode(code);
-    scope_info = Handle<ScopeInfo>(ScopeInfo::Empty(isolate));
   } else if (Renumber(&info) && FullCodeGenerator::MakeCode(&info)) {
     DCHECK(!info.code().is_null());
-    scope_info = ScopeInfo::Create(info.scope(), info.zone());
+    result->set_scope_info(*ScopeInfo::Create(info.scope(), info.zone()));
   } else {
     return Handle<SharedFunctionInfo>::null();
   }
 
-  // Create a shared function info object.
-  Handle<SharedFunctionInfo> result = factory->NewSharedFunctionInfo(
-      literal->name(), literal->materialized_literal_count(), literal->kind(),
-      info.code(), scope_info, info.feedback_vector());
+  result->set_code(*info.code());
   SetFunctionInfo(result, literal, false, script);
   RecordFunctionCompilation(Logger::FUNCTION_TAG, &info, result);
   result->set_allows_lazy_compilation(allow_lazy);
   result->set_allows_lazy_compilation_without_context(allow_lazy_without_ctx);
+  result->set_has_saved_optimized_code(has_saved_optimized_code);
+
+  // Register this shared function info in the outer shared function info.
+  Handle<SharedFunctionInfo> outer_shared_info = outer_info->shared_info();
+  DCHECK(!outer_shared_info.is_null());
+  result->set_outer_info(*outer_shared_info);
+  outer_shared_info->inner_infos()->set(literal->inner_function_index(),
+                                        *result);
 
   // Set the expected number of properties for instances and return
   // the resulting function.
@@ -1358,7 +1529,7 @@ MaybeHandle<Code> Compiler::GetOptimizedCode(Handle<JSFunction> function,
   PostponeInterruptsScope postpone(isolate);
 
   Handle<SharedFunctionInfo> shared = info->shared_info();
-  if (shared->code()->kind() != Code::FUNCTION ||
+  if (current_code.is_null() || shared->code()->kind() != Code::FUNCTION ||
       ScopeInfo::Empty(isolate) == shared->scope_info()) {
     // The function was never compiled. Compile it unoptimized first.
     // TODO(titzer): reuse the AST and scope info from this compile.
@@ -1474,6 +1645,33 @@ bool CompilationPhase::ShouldProduceTraceOutput() const {
          info()->closure()->PassesFilter(FLAG_trace_hydrogen_filter));
   return (tracing_on &&
       base::OS::StrChr(const_cast<char*>(FLAG_trace_phase), name_[0]) != NULL);
+}
+
+
+SmartPointer<CodeBlockDatabase> Compiler::code_block_database;
+
+
+void Compiler::InitializeCodeBlockDatabase() {
+  DCHECK(FLAG_save_code || FLAG_load_code);
+  CodeBlockDatabase* db;
+  if (FLAG_save_code) {
+    db = new CodeBlockDatabase;
+  } else { // FLAG_load_code
+    db = new CodeBlockDatabase(FLAG_load_code);
+  }
+  code_block_database = SmartPointer<CodeBlockDatabase>(db);
+}
+
+
+bool Compiler::DiscardCodeFromCodeBlockDatabase(int start_position) {
+  DCHECK(FLAG_save_code);
+  return code_block_database->RemoveCode(start_position);
+}
+
+
+void Compiler::FinalizeCodeBlockDatabase() {
+  DCHECK(FLAG_save_code);
+  code_block_database->Write(FLAG_save_code);
 }
 
 } }  // namespace v8::internal

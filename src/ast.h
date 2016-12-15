@@ -2507,7 +2507,11 @@ class FunctionLiteral FINAL : public Expression {
   int materialized_literal_count() { return materialized_literal_count_; }
   int expected_property_count() { return expected_property_count_; }
   int handler_count() { return handler_count_; }
+  int inner_function_count() { return inner_function_count_; }
   int parameter_count() { return parameter_count_; }
+
+  int inner_function_index() { return inner_function_index_; }
+  void set_inner_function_index(int index) { inner_function_index_ = index; }
 
   bool AllowsLazyCompilation();
   bool AllowsLazyCompilationWithoutContext();
@@ -2609,7 +2613,8 @@ class FunctionLiteral FINAL : public Expression {
                   AstValueFactory* ast_value_factory, Scope* scope,
                   ZoneList<Statement*>* body, int materialized_literal_count,
                   int expected_property_count, int handler_count,
-                  int parameter_count, FunctionType function_type,
+                  int inner_function_count, int parameter_count,
+                  FunctionType function_type,
                   ParameterFlag has_duplicate_parameters,
                   IsFunctionFlag is_function,
                   IsParenthesizedFlag is_parenthesized, FunctionKind kind,
@@ -2623,6 +2628,7 @@ class FunctionLiteral FINAL : public Expression {
         materialized_literal_count_(materialized_literal_count),
         expected_property_count_(expected_property_count),
         handler_count_(handler_count),
+        inner_function_count_(inner_function_count),
         parameter_count_(parameter_count),
         function_token_position_(RelocInfo::kNoPosition) {
     bitfield_ = IsExpression::encode(function_type != DECLARATION) |
@@ -2649,6 +2655,8 @@ class FunctionLiteral FINAL : public Expression {
   int materialized_literal_count_;
   int expected_property_count_;
   int handler_count_;
+  int inner_function_count_;
+  int inner_function_index_;
   int parameter_count_;
   int function_token_position_;
 
@@ -3655,7 +3663,8 @@ class AstNodeFactory FINAL BASE_EMBEDDED {
   FunctionLiteral* NewFunctionLiteral(
       const AstRawString* name, AstValueFactory* ast_value_factory,
       Scope* scope, ZoneList<Statement*>* body, int materialized_literal_count,
-      int expected_property_count, int handler_count, int parameter_count,
+      int expected_property_count, int handler_count,
+      int inner_function_count, int parameter_count,
       FunctionLiteral::ParameterFlag has_duplicate_parameters,
       FunctionLiteral::FunctionType function_type,
       FunctionLiteral::IsFunctionFlag is_function,
@@ -3663,9 +3672,9 @@ class AstNodeFactory FINAL BASE_EMBEDDED {
       int position) {
     FunctionLiteral* lit = new (zone_) FunctionLiteral(
         zone_, name, ast_value_factory, scope, body, materialized_literal_count,
-        expected_property_count, handler_count, parameter_count, function_type,
-        has_duplicate_parameters, is_function, is_parenthesized, kind,
-        position);
+        expected_property_count, handler_count, inner_function_count,
+        parameter_count, function_type, has_duplicate_parameters,
+        is_function, is_parenthesized, kind, position);
     // Top-level literal doesn't count for the AST's properties.
     if (is_function == FunctionLiteral::kIsFunction) {
       visitor_.VisitFunctionLiteral(lit);

@@ -924,6 +924,7 @@ void PreParser::ParseLazyFunctionLiteralBody(bool* ok) {
   log_->LogFunction(body_start, body_end,
                     function_state_->materialized_literal_count(),
                     function_state_->expected_property_count(),
+                    function_state_->inner_function_count(),
                     strict_mode());
 }
 

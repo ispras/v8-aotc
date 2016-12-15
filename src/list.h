@@ -84,6 +84,12 @@ class List {
     return Vector<const T>(data_, length_);
   }
 
+  Vector<const T> Detach() {
+    Vector<const T> vector(data_, length_);
+    Initialize(0);
+    return vector;
+  }
+
   // Adds a copy of the given 'element' to the end of the list,
   // expanding the list if necessary.
   void Add(const T& element, AllocationPolicy allocator = AllocationPolicy());
@@ -94,6 +100,8 @@ class List {
 
   // Add all the elements from the vector to this list.
   void AddAll(const Vector<T>& other,
+              AllocationPolicy allocator = AllocationPolicy());
+  void AddAll(const Vector<const T>& other,
               AllocationPolicy allocator = AllocationPolicy());
 
   // Inserts the element at the specific index.
@@ -177,6 +185,9 @@ class List {
 
   // Resize the list.
   void Resize(int new_capacity, AllocationPolicy allocator);
+
+  // Increase the capacity by the given amount, but not less than by 100%.
+  void GrowBy(int amount, AllocationPolicy allocator);
 
   DISALLOW_COPY_AND_ASSIGN(List);
 };

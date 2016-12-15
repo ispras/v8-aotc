@@ -2987,6 +2987,17 @@ void Heap::CreateInitialObjects() {
 }
 
 
+Heap::RootListIndex Heap::RootIndex(Object* object) {
+  for (int i = 0; i < Heap::kRootListLength; ++i) {
+    if (roots_[i] == object) {
+      return static_cast<RootListIndex>(i);
+    }
+  }
+
+  return kNotFound;
+}
+
+
 bool Heap::RootCanBeWrittenAfterInitialization(Heap::RootListIndex root_index) {
   RootListIndex writable_roots[] = {
       kStoreBufferTopRootIndex,

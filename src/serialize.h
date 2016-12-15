@@ -27,10 +27,11 @@ enum TypeCode {
   ACCESSOR,
   STUB_CACHE_TABLE,
   RUNTIME_ENTRY,
-  LAZY_DEOPTIMIZATION
+  LAZY_DEOPTIMIZATION,
+  SPECIAL // References added after the table was initially populated.
 };
 
-const int kTypeCodeCount = LAZY_DEOPTIMIZATION + 1;
+const int kTypeCodeCount = SPECIAL + 1;
 const int kFirstTypeCode = UNCLASSIFIED;
 
 const int kReferenceIdBits = 16;
@@ -58,6 +59,10 @@ class ExternalReferenceTable {
 
   int max_id(int code) { return max_id_[code]; }
 
+  void Add(Address address, const char* name, TypeCode type = UNCLASSIFIED) {
+    Add(address, type, ++max_id_[type], name);
+  }
+
  private:
   explicit ExternalReferenceTable(Isolate* isolate) : refs_(64) {
     PopulateTable(isolate);
@@ -79,10 +84,6 @@ class ExternalReferenceTable {
 
   // For other types of references, the caller will figure out the address.
   void Add(Address address, TypeCode type, uint16_t id, const char* name);
-
-  void Add(Address address, const char* name) {
-    Add(address, UNCLASSIFIED, ++max_id_[UNCLASSIFIED], name);
-  }
 
   List<ExternalReferenceEntry> refs_;
   uint16_t max_id_[kTypeCodeCount];
